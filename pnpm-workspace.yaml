@@ -18,6 +18,13 @@ overrides:
   'extract-zip>yauzl': '3.4.0'
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
+  # Mirror-registry drift pins: keep the micromark family on the exact
+  # versions upstream's lockfile resolved to (the npmmirror metadata resolves
+  # these ranges to newer patches, which puts 2.0.2 and 2.0.3 side by side
+  # and breaks ui-primitives' typecheck).
+  'micromark-core-commonmark': '2.0.3'
+  'micromark-factory-space': '2.0.1'
+  'micromark-util-types': '2.0.2'
 
 peerDependencyRules:
   allowedVersions:

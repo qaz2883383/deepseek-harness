@@ -75,6 +75,13 @@
     - id: session-log-download
       name: '@deepseek-ai/dsh-session-log-export'
 
+    # Personal workbench: per-conversation reply-style preferences.
+    - id: preferences
+      name: '@deepseek-ai/dsh-preferences'
+    # Personal workbench: first-class task records for the task board.
+    - id: tasks
+      name: '@deepseek-ai/dsh-tasks'
+
     # Session-header "Open In..." split button over the host application
     # resolution (macOS/Windows/Linux; a host with no resolved application
     # renders no button). Two halves: the host routes and the browser surface.
@@ -258,8 +265,10 @@
     - id: ui-shortcuts
       name: '@deepseek-ai/dsh-client-ui-shortcuts'
 
+    # Workbench copy of ui-layout (carries the board-shell collapsed-width
+    # patch); the upstream package stays as a library for type imports.
     - id: ui-layout
-      name: '@deepseek-ai/dsh-client-ui-layout'
+      name: '@workbench/ui-layout'
 
     - id: ui-renderer
       name: '@deepseek-ai/dsh-client-ui-renderer'
@@ -324,8 +333,10 @@
     - id: ui-approval
       name: '@deepseek-ai/dsh-client-ui-approval'
 
+    # Workbench copy of ui-chat (carries the fork-at feature-panel guard);
+    # the upstream package stays as a library for type imports.
     - id: ui-chat
-      name: '@deepseek-ai/dsh-client-ui-chat'
+      name: '@workbench/ui-chat'
 
     # Official occupants for the generic sidebar and conversation brand slots.
     - id: ui-brand-official
@@ -444,6 +455,10 @@
 
     - id: ui-trajectory
       name: '@deepseek-ai/dsh-client-ui-trajectory'
+
+    # Personal workbench: sticky-note task board as a main panel.
+    - id: ui-board
+      name: '@deepseek-ai/dsh-client-ui-board'
 
 # ── the agent plane moves behind agent presets ─────────────────────────────
 #
