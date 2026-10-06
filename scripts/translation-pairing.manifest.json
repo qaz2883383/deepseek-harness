@@ -8,6 +8,10 @@
     "docs/cordis-api/inherited.md",
     "docs/i18n/style-samples.md",
     "docs/i18n/terminology.md",
-    "docs/i18n/translation-prompt.md"
+    "docs/i18n/translation-prompt.md",
+    "docs/personal-workbench-devlog.md",
+    "packages/client/ui-chat-workbench/README.md",
+    "packages/client/ui-layout-workbench/README.md",
+    "packages/context/preferences/README.md"
   ]
 }
