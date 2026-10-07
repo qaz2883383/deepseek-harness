@@ -89,12 +89,6 @@
   border-color: var(--dsw-alias-border-l2);
 }
 
-/* Bell toggle: granted system-notification permission. */
-.toolButtonActive {
-  color: var(--dsw-alias-state-business-primary);
-  border-color: var(--dsw-alias-state-business-primary);
-}
-
 .toolButton:disabled {
   cursor: default;
   opacity: 0.6;
@@ -533,11 +527,29 @@
   overflow-wrap: anywhere;
 }
 
-.planDeadline {
+/* Inline closure-date editor on a plan row: quiet until hovered or focused. */
+.planDeadlineEdit {
+  font: inherit;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-state-warn-primary);
-  white-space: nowrap;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 1px 4px;
+  width: 118px;
+  cursor: pointer;
+}
+
+.planDeadlineEdit:hover {
+  border-color: var(--dsw-alias-border-l1);
+}
+
+.planDeadlineEdit:focus {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-layer-2);
+  outline: none;
 }
 
 /* ---- Detail: session list -------------------------------------------------- */
@@ -651,13 +663,43 @@
   min-width: 0;
 }
 
-.chatEmpty {
+.chatEmptyBlock {
   margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   padding: 24px;
+  max-width: 280px;
+  text-align: center;
+}
+
+.chatEmptyGlyph {
+  font-size: 30px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.chatEmptyText {
+  margin: 0;
   font-size: 13px;
   color: var(--dsw-alias-label-tertiary);
-  text-align: center;
-  max-width: 280px;
+}
+
+.chatEmptyNew {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-inverse);
+  background: var(--dsw-alias-state-business-primary);
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.chatEmptyNew:hover {
+  background: var(--dsw-static-deepseek-600);
 }
 
 /* ---- Calendar --------------------------------------------------------------- */

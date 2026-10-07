@@ -178,6 +178,7 @@
     "@deepseek-ai/schemastery": "workspace:~",
     "@workbench/ui-chat": "workspace:*",
     "@workbench/ui-layout": "workspace:*",
+    "@workbench/ui-sidebar-right": "workspace:*",
     "commander": "^15.0.0",
     "open": "^11.0.0",
     "@deepseek-ai/dsh-api-account-controller": "workspace:*",

@@ -480,6 +480,92 @@ packages/client/ui-board/
 - 普通新会话（未指定任务）→ 归属"其它"
 - 在会话里更新其它任务 → 应收到报错引导 task_start
 
+### 2026-10-06 · v17.5：两项批次——移除 🔔 系统通知开关（用户判定无用）+ 计划闭环日期详情内联可编辑
+
+**用户规格**：① 铃铛按钮（系统通知已开启）没用就去掉；② 计划项有时间时，点击时间可修改，日历同步。
+
+**改动一：移除系统通知特性**（`ui-board`）：
+- BoardView：删 `notifyPermission` state、`requestSystemNotify`、🔔 按钮（授权后它只是永久禁用的状态图标，纯占位；页面内提醒条不受影响）
+- BoardToasts：删 `new Notification(...)` OS 弹送分支（按钮移除后授权永不可达，成死代码）
+- locales 删 `notify.enable/on/blocked`（保留 `notify.title`，页面内提醒条徽标仍用）；CSS 删 `.toolButtonActive`
+- v16.4 引入的该特性整体下线；如需恢复见 v16.4 记录
+
+**改动二：计划闭环日期内联编辑**（`ui-board`）：
+- TaskDetail 计划行的 `◷ 日期` 静态 span 改为原生 `type="date"` 输入（`planDeadlineEdit`：平时与文本融为一体，hover 显边框、focus 高亮）——点击即开日期选择器，改完即存
+- 新增 `onPlanDeadline(itemId, deadline)` 回调：POST 整个 plan（清空日期 = 删除闭环）；日历黄点/逾期判定经 tasks 派生自动同步（run() 即时刷新 + 5s 轮询兜底）
+- 新文案 `plan.deadlineEdit`（zh/en）；CSS 删失效的 `.planDeadline`
+
+**部署**：停 3081 → 全量 build → 重启。插曲：首次构建遇 `inspector/lib/devtools` EPERM（无进程占用、目录已被失败构建回滚，疑似杀软瞬时锁），清理后重试即过——363 artifacts。
+
+**待用户验收**（刷新浏览器）：① 工具行只剩 ✎ 和 ⚙；② 任务详情计划项点日期 → 改日期 → 日历 tab 黄点应移动，改成过去日期左列应亮红色逾期灯；清空日期 → 闭环消失。
+
+### 2026-10-06 · v17.4：板内点击文件报"no session surface is mounted"返修——@workbench/ui-sidebar-right 副本（任务板会话接管右侧 dock）
+
+**用户报告**：任务板会话里点击文件报错 `无法打开文件 sidebarRight: no session surface is mounted`。
+
+**根因**（三层门控全在上游 ui-sidebar-right）：`openFile → ctx.sidebarRight.openResource → require()` 需要"挂载中的会话 surface"，而上游挂载链路是 ① `views.select(uiSession.adapter.current)` 只跟 mainView 绑定（board 的 boardChat retain 不算）；② `show(activePanelId === null ? selected : undefined)`——功能面板（任务板）激活即无 surface；③ `RightbarRoot` 的 `visible` 同样只认 `activePanelId === null`。任务板是功能面板，三处全拒。
+
+**修复**：按 fork 副本制新增 `packages/client/ui-sidebar-right-workbench/`（`@workbench/ui-sidebar-right`，上游包全量复制、tests 保留上游）：
+
+- 新增 `board-channel.ts`：`data-dsh-board-session` DOM 属性 + `dsh-board-session` 变更事件（沿用 board shell 属性的 DOM 总线约定，插件间零运行时依赖）
+- 三处补丁：保留视图选择的 effect 在任务板面板激活时改选板内会话（监听 current/panelInfo/事件三源）；`show` 门控放行任务板面板；`RightbarRoot.visible` 放行任务板面板
+- `ui-board`：BoardView 新增 effect，右栏会话变化时写属性 + 派事件（读者都以"任务板面板激活"为门，脏属性不会外泄）
+
+**接线**：tsconfig.base.json paths、tsconfig.client.json 引用、web-app `package.json` 依赖 + `cordis.patch.yml` 的 `ui-sidebar-right` 行改指副本（--no-frozen-lockfile 更新锁文件）。
+
+**踩坑**：① Copy-Item 跟随 pnpm 符号链接展开 node_modules 导致长路径报错——改 robocopy /XD node_modules lib；② 复制的 tests 被 tsconfig.client.json 的 `packages/client/*/tests/**` 全量编译，与上游类型名义冲突（SidebarRightTabInfo 双胞胎不可互换）——删除副本 tests 解决；③ 全量构建需先停 3081（锁产物目录 EPERM 老问题）。
+
+**部署**：pnpm install → 全量 build（363 artifacts，+2 为新副本）→ 重启 3081。产物 grep 确认三处补丁与 ui-board 广播均已编译；boot manifest 确认 `@workbench/ui-sidebar-right` 已入浏览器 roster（出现 5 次，与 ui-chat 副本一致）。
+
+**待用户验收**（刷新浏览器）：任务板右栏会话里点击文件（附件/文件链接/changed-files 卡片）→ 应在框架最右列弹出文档预览 dock，不再报错；主视图会话（若有）的预览行为不变；板内切换会话后预览 surface 跟随。
+
+### 2026-10-06 · v17.3：v17.2 语义返修——"最后一个会话"应为"最后打开的会话"（每任务记忆）
+
+**用户纠错**：v17.2 的 `lastSessionOf` 按 `updatedAt` 降序选会话，实际表现为"切到最后创建/最新的会话"；用户要的是"切换到最后一个**打开**的会话"。
+
+**改动**（`BoardView.tsx`）：
+
+- 新增 `lastOpenedByTask`（ref Map：taskId → sessionId）：effect 监听 `boardSessionId` + `mergedTasks`，右栏每次绑定会话即按当前归属任务记录；会话被 re-home（task_start 换任务）时从旧任务记忆中移除
+- `lastSessionOf` 优先返回该任务**最后打开**的会话（读取时校验：仍归属该任务且未归档，失效则忽略）；从未打开过的任务才回退到最近活跃会话
+- 无会话任务的"新建会话"引导（v17.2）不变
+
+**部署**：停 3081 → 全量 build → 重启。产物 grep 确认 `lastOpenedByTask` 已在 `lib/client.js`。
+
+**待用户验收**（刷新浏览器）：任务 A 打开会话 S1 → 切到任务 B 再切回 A → 右栏应仍是 S1（而非 A 的最新会话）；从未点开过的任务 → 仍回退显示其最近会话。
+
+### 2026-10-06 · v17.2：任务切换右栏跟随 + 空任务"新建会话"引导（用户规格：切任务=切会话）
+
+**用户规格**：点击切换任务时候，会话框没有跟随切换；会话框应该切换到该任务最后一个会话，如果没有，应该是一个新建会话的图示。
+
+**改动**（`packages/client/ui-board/`，纯 client 面）：
+
+- `BoardView.tsx`：
+  - 任务卡 onClick 追加 `selectBoardSession(lastSessionOf(task))`——右栏跟随绑定该任务最近活跃会话（`lastSessionOf`：过滤 archived，按 `updatedAt` 降序，平局取列表靠后者=最新创建；无会话返回 undefined=释放右栏）
+  - 抽出 `startSessionFor(taskId)`（原 TaskDetail onNewSession 内联逻辑），供任务详情按钮与右栏空态共用
+  - 右栏空态从纯文本升级为引导块：💬 图标 + "这个任务还没有会话" + "新会话"按钮（为当前选中任务创建并跟随）
+- `locales.ts`：新增 `chat.emptyTask`（zh/en）；按钮文案复用 `task.newSession`
+- `BoardAction.module.css`：`.chatEmpty` 替换为 `.chatEmptyBlock/.chatEmptyGlyph/.chatEmptyText/.chatEmptyNew`，样式对齐 `.newTaskButton`（真实主题变量，返工一处 `--dsh-`→`--dsw-` 笔误——v16.1 教训再现）
+
+**部署**：停 3081 → 全量 build（361 artifacts，3 public values）→ 重启 3081。产物 grep 确认 `lastSessionOf`/`startSessionFor`/`chatEmptyBlock` 已在 `lib/client.js`。
+
+**待用户验收**（刷新浏览器）：点左列不同任务卡 → 右栏应切到该任务最近会话；点无会话的任务 → 右栏显示 💬 + "新会话"按钮，点击即在 该任务下建会话并跟随。
+
+### 2026-10-06 · v17.1：完成提醒 toast 跳转返修——点击落点从主视图会话改为任务板右栏（用户报告"窗口异常"）
+
+**用户报告**：任务完成提醒的标签一点击会跳到（顶层）会话窗口，不是任务底下的会话窗口，导致窗口异常。
+
+**根因**：`BoardToasts` 点击调用 `BoardInjected.openSession`，其实现是 `uiWorkspace.openSession(sessionId)`——直接把主视图切到 Conversation。v11/v16 已把所有"跳主视图"通道封死（隐藏侧栏、删 ↗、forkAt 守卫），toast 是 v4 时代的漏网之鱼：一跳就离开三列工作台，且本 shell 隐藏原生侧栏的属性下主视图布局必然异常。
+
+**修复**（`packages/client/ui-board/`，纯 client 面零 host 改动）：
+
+- `index.ts`：`openSession` 改名 `openBoardSession`，实现改为 `layout.selectPanel(PANEL_ID)` + 模块级请求通道——`requestBoardSession` 通知已挂载 BoardView 即时跟随；未挂载则暂存（`requestedBoardSessionId`），挂载后 `takeRequestedBoardSession` 消费（selectPanel 触发的挂载必然晚于请求发出）
+- `BoardView.tsx`：新增跟随 effect——右栏 `selectBoardSession` + 中列联动选中所属任务（`mergedTasks` 查 owner，找不到归属则只切右栏）+ 切回详情 tab
+- `BoardToasts.tsx`：改用 `openBoardSession`（全仓唯一消费点）
+
+**部署**：全量 `pnpm run build`（改产物必须停 3081 再建：运行中的 server 会锁住 `experimental/inspector/lib/devtools` 导致 tsdown EPERM rename）；记录 361 client artifacts、3 public values（新增 `DSH_CLIENT_GIT_DIRTY=true`，因工作区有未提交改动）。产物 grep 确认 `openBoardSession`/`requestBoardSession` 已在 `lib/client.js`。重启 3081。
+
+**待用户验收**（刷新浏览器）：任务运行完成 → 点提醒标签 → 应留在任务板内：右栏切到该会话、中列选中其所属任务；若当时在其它主面板，应切回任务板而非主视图会话。
+
 ### 2026-10-05 · v17：基线升级 0.1.7 → 0.2.1-alpha.1 全量移植（custom 副本制落地，3091 全量验证通过）
 
 **背景**：本地基线（0.1.7-alpha.1，c36a83f）与 fork HEAD（0.2.1-alpha.1，5badb15）相差 20734 个提交。用户指令：新目录克隆最新 dsh → 全部改动合入 → 对旧插件的修改一律"卸载原插件 + 复制 custom 副本 + 基于副本改"（便于维护）→ 按开发日志验证 → commit + push。

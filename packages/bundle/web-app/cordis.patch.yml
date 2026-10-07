@@ -283,9 +283,11 @@
     - id: ui-sidebar
       name: '@deepseek-ai/dsh-client-ui-sidebar'
 
-    # The right Sidebar: one docking surface per session over ui-dockkit.
+    # Workbench copy of ui-sidebar-right (carries the task-board session
+    # surface patch); the upstream package stays as a library for type
+    # imports.
     - id: ui-sidebar-right
-      name: '@deepseek-ai/dsh-client-ui-sidebar-right'
+      name: '@workbench/ui-sidebar-right'
 
 
     - id: office-to-pdf

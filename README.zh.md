@@ -73,6 +73,7 @@ flowchart TB
 | `packages/client/ui-board/` | 自有 client 插件 | 三列工作台：左列任务便签（运行/逾期/完成指示灯、类别徽章、进度、置顶），中列任务详情与日历（deadline 与提醒点、新建/取消提醒），右列嵌入完整会话（可直接对话）；fork 跟随与归属；🔔 系统通知授权；三列宽度可拖动 |
 | `packages/client/ui-chat-workbench/` | `@workbench/ui-chat` 副本 | 上游 `dsh-client-ui-chat` 全量复制；唯一补丁：`forkAt` 在功能面板持有主视图时不再 `openSession` 抢占（`activePanelId` 守卫） |
 | `packages/client/ui-layout-workbench/` | `@workbench/ui-layout` 副本 | 上游 `dsh-client-ui-layout` 全量复制；唯一补丁：`AppFrame` 的 `collapsedWidth` 识别任务板 shell 属性 |
+| `packages/client/ui-sidebar-right-workbench/` | `@workbench/ui-sidebar-right` 副本 | 上游 `dsh-client-ui-sidebar-right` 全量复制（tests 保留在上游）；补丁：任务板面板激活时，板内右栏会话接管右侧 dock——保留视图选择、`show` 挂载门控、`RightbarRoot` 可见性三处均放行任务板面板，板内点击文件即可在框架右列预览；会话经 ui-board 发布的 `data-dsh-board-session` DOM 属性 + 变更事件传递 |
 | `packages/bundle/web-app/` | 组合接线 | `cordis.patch.yml`：host 行新增 preferences/tasks、client 行新增 ui-board，ui-layout/ui-chat 行改指 `@workbench/*` 副本；`package.json` 增补 workspace 依赖 |
 | 根目录配置 | 构建接线 | `tsconfig.base/host/client.json` 路径与引用；`pnpm-workspace.yaml` overrides 钉住 micromark 三件套（npm 镜像解析漂移会导致类型冲突） |
 | `scripts/` | 辅助工具 | `dump-one-session.mts`、`dump-rtc.mts`、`inspect-task-sessions.mts` 会话检查脚本 |

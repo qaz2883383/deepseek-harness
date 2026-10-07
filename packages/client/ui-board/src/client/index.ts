@@ -34,8 +34,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** Navigation callbacks handed to the board components. */
 export interface BoardInjected {
-  /** Open one task conversation in the main view. */
-  openSession: (sessionId: string) => void
+  /**
+   * Open one task conversation in the board's right column. The board panel
+   * is selected first, so the jump never leaves the workbench shell for the
+   * main-view Conversation.
+   */
+  openBoardSession: (sessionId: string) => void
   /**
    * Retain one session for the board's right column; `undefined` releases.
    * The reference's lifetime is the caller's (release explicitly).
@@ -66,6 +70,38 @@ export const PANEL_ID = 'task-board' as MainPanelId
  * bidirectional, so a plugin reload must not re-toggle it open). */
 let sidebarHiddenOnce = false
 
+/**
+ * Session requests from frame-level surfaces (the completion toasts): the
+ * mounted BoardView follows them live through its subscription, and a request
+ * that arrives while the board is unmounted waits for the mount the caller's
+ * panel selection is about to trigger.
+ */
+let requestedBoardSessionId: string | undefined
+const boardSessionListeners = new Set<(sessionId: string) => void>()
+
+/** Hand one session to the mounted board's right column. */
+function requestBoardSession(sessionId: string): void {
+  requestedBoardSessionId = sessionId
+  const mounted = [...boardSessionListeners]
+  for (const listener of mounted) listener(sessionId)
+  // A mounted board followed the session live; without one the request stays
+  // pending for the board the caller's selectPanel is about to mount.
+  if (mounted.length > 0) requestedBoardSessionId = undefined
+}
+
+/** Subscribe the mounted board to session requests; returns the unsubscribe. */
+export function subscribeBoardSession(listener: (sessionId: string) => void): () => void {
+  boardSessionListeners.add(listener)
+  return () => { boardSessionListeners.delete(listener) }
+}
+
+/** Claim the request that arrived while the board was unmounted, if any. */
+export function takeRequestedBoardSession(): string | undefined {
+  const pending = requestedBoardSessionId
+  requestedBoardSessionId = undefined
+  return pending
+}
+
 /** Required services: slots/locale plus the session store and navigation. */
 export const inject = ['slots', 'locale', 'uiWorkspace', 'sessions', 'layout', 'remote', 'remote.schedule']
 
@@ -86,9 +122,21 @@ export function apply(ctx: ClientContext): void {
   // cast keeps this package free of a session-controller type dependency.
   const sessionsService = (ctx as unknown as { sessions?: SessionsServiceLike }).sessions
   const boardInjected = (): BoardInjected => ({
-    openSession: (sessionId: string): void => {
-      const uiWorkspace = (ctx as unknown as { uiWorkspace?: { openSession: (target: unknown) => void } }).uiWorkspace
-      uiWorkspace?.openSession(sessionId)
+    openBoardSession: (sessionId: string): void => {
+      // The completion toast must land inside the board, never in the
+      // main-view Conversation: this shell hides the native sidebar, so a
+      // main-view switch both abandons the workbench and breaks the frame.
+      // Select the board panel first (the toast fires from any panel), then
+      // route the session to the mounted board — or leave it pending for
+      // the mount the selection just scheduled.
+      const layout = (ctx as unknown as { layout?: { selectPanel(panelId: string): void } }).layout
+      try {
+        layout?.selectPanel(PANEL_ID)
+      } catch {
+        // The layout service validates registered keys; a miss only means
+        // the board is not selectable (yet) and the request stays pending.
+      }
+      requestBoardSession(sessionId)
     },
     retainBoardSession: (sessionId: string | undefined, signal: AbortSignal): SessionReference | undefined => {
       if (sessionId === undefined) return undefined

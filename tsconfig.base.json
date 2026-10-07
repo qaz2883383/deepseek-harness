@@ -215,6 +215,8 @@
       "@deepseek-ai/dsh-client-ui-dockkit": ["./packages/client/ui-dockkit/src"],
       "@deepseek-ai/dsh-client-ui-sidebar-right": ["./packages/client/ui-sidebar-right/src"],
       "@deepseek-ai/dsh-client-ui-sidebar-right/client": ["./packages/client/ui-sidebar-right/src/client"],
+      "@workbench/ui-sidebar-right": ["./packages/client/ui-sidebar-right-workbench/src"],
+      "@workbench/ui-sidebar-right/client": ["./packages/client/ui-sidebar-right-workbench/src/client"],
       "@deepseek-ai/dsh-client-ui-sidebar-documentpreview": ["./packages/client/ui-sidebar-documentpreview/src"],
       "@deepseek-ai/dsh-client-ui-sidebar-documentpreview/client": ["./packages/client/ui-sidebar-documentpreview/src/client"],
       "@deepseek-ai/dsh-client-ui-sidebar-browser": ["./packages/client/ui-sidebar-browser/src"],

@@ -4,7 +4,7 @@ import type { SessionReference } from '@deepseek-ai/dsh-api-session-controller/c
 import type { ScheduleCatalogEntry } from '@deepseek-ai/dsh-schedule/client'
 import type { PropsLocale, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { UseSessions } from '@deepseek-ai/dsh-client-ui-session/client'
-import type { BoardInjected } from './index.ts'
+import { subscribeBoardSession, takeRequestedBoardSession, type BoardInjected } from './index.ts'
 import { NS } from './locales.ts'
 import css from './BoardAction.module.css'
 
@@ -195,16 +195,6 @@ export function BoardView({
   const [prefsOpen, setPrefsOpen] = useState(false)
   const [selections, setSelections] = useState<Readonly<Record<string, Category>>>(EMPTY_SELECTIONS)
   const [taskQuery, setTaskQuery] = useState('')
-  // Web-notification permission; the reminder toast only reaches the OS when
-  // the host browser (a real Chrome/Edge window, not an embedded preview)
-  // has been granted permission.
-  const [notifyPermission, setNotifyPermission] = useState<string>(
-    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
-  )
-  const requestSystemNotify = (): void => {
-    if (typeof Notification === 'undefined') return
-    void Notification.requestPermission().then((permission) => { setNotifyPermission(permission) })
-  }
   // ---- Column resizing ----------------------------------------------------
   const [notesWidth, setNotesWidth] = useState(236)
   const [detailWidth, setDetailWidth] = useState(340)
@@ -333,6 +323,32 @@ export function BoardView({
   const taskRunning = (task: TaskRecord): boolean =>
     task.sessions.some(id => sessionOf(id)?.running === true)
 
+  // Per task, the session the user last viewed in the right column; a task
+  // switch restores it before falling back to the most recent session.
+  const lastOpenedByTask = useRef(new Map<string, string>())
+
+  // The session the right column follows when a task is picked: the one the
+  // user last opened in it (still owned by the task and not archived),
+  // falling back to the most recently active live session for a task never
+  // opened (ties preferring the newest list entry).
+  const lastSessionOf = (task: TaskRecord): string | undefined => {
+    const remembered = lastOpenedByTask.current.get(task.id)
+    if (remembered !== undefined && !archived.has(remembered) && task.sessions.includes(remembered)) {
+      return remembered
+    }
+    let best: string | undefined
+    let bestAt = -1
+    for (const id of task.sessions) {
+      if (archived.has(id)) continue
+      const at = sessionOf(id)?.updatedAt ?? 0
+      if (at >= bestAt) {
+        best = id
+        bestAt = at
+      }
+    }
+    return best
+  }
+
   // Pull the schedule projection baseline once per session row (live rows
   // then update through the control stream on their own). The dedupe ref
   // makes reruns no-ops, and the store-derived dependency keeps it stable.
@@ -392,6 +408,52 @@ export function BoardView({
     }
     return [...mergedTasks].sort((left, right) => rank(left) - rank(right))
   }, [mergedTasks])
+
+  // The frame-level completion toast routes its session here (see index.ts):
+  // follow it in the right column and surface the owning task in the middle
+  // column, so the jump lands inside the board instead of the main view.
+  useEffect(() => {
+    const follow = (sessionId: string): void => {
+      selectBoardSession(sessionId)
+      const owner = mergedTasks.find(task => task.sessions.includes(sessionId))
+      if (owner !== undefined) {
+        setSelectedTaskId(owner.id)
+        setTab('detail')
+      }
+    }
+    const unsubscribe = subscribeBoardSession(follow)
+    const pending = takeRequestedBoardSession()
+    if (pending !== undefined) follow(pending)
+    return unsubscribe
+  }, [selectBoardSession, mergedTasks])
+
+  // Record what the right column shows per owning task, so switching back to
+  // a task restores its last opened session (a re-homed session is dropped
+  // from its previous task's memory here and rejected on read otherwise).
+  useEffect(() => {
+    if (boardSessionId === undefined) return
+    const owner = mergedTasks.find(task => task.sessions.includes(boardSessionId))
+    if (owner === undefined) return
+    for (const [taskId, sessionId] of lastOpenedByTask.current) {
+      if (sessionId === boardSessionId && taskId !== owner.id) lastOpenedByTask.current.delete(taskId)
+    }
+    lastOpenedByTask.current.set(owner.id, boardSessionId)
+  }, [boardSessionId, mergedTasks])
+
+  // Publish the right-column Session for the workbench ui-sidebar-right copy:
+  // the attribute rides the document element (the same DOM-bus convention as
+  // the board shell attribute) and the event tells its listeners the value
+  // changed without polling. Readers gate on the task-board panel being the
+  // active one, so a stale attribute never speaks outside the board.
+  useEffect(() => {
+    if (boardSessionId === undefined) document.documentElement.removeAttribute('data-dsh-board-session')
+    else document.documentElement.setAttribute('data-dsh-board-session', boardSessionId)
+    document.documentElement.dispatchEvent(new CustomEvent('dsh-board-session'))
+    return () => {
+      document.documentElement.removeAttribute('data-dsh-board-session')
+      document.documentElement.dispatchEvent(new CustomEvent('dsh-board-session'))
+    }
+  }, [boardSessionId])
 
   const normalizedQuery = taskQuery.trim().toLowerCase()
   const visible = useMemo(() => {
@@ -456,6 +518,20 @@ export function BoardView({
     await refreshTasks()
   }, [refreshTasks])
 
+  // Start a session under one task and follow it in the right column once it
+  // reaches the client directory (the retain reports unknown ids until then).
+  const startSessionFor = useCallback((taskId: string): void => {
+    void run(async () => {
+      const result = await postTasks({ op: 'newSession', taskId })
+      if (result === undefined) {
+        window.alert(t('error.op'))
+        return
+      }
+      const sessionId = result.sessionId
+      if (typeof sessionId === 'string') openSessionWhenReady(sessionId)
+    })
+  }, [run, t, openSessionWhenReady])
+
   const filters: readonly WallFilter[] = ['all', 'running', 'done']
   const countOf = (key: WallFilter): number => {
     if (key === 'all') return displayTasks.length
@@ -488,19 +564,6 @@ export function BoardView({
             {t('task.new')}
           </button>
           <div className={css.notesTools}>
-            {notifyPermission !== 'unsupported'
-              ? <button
-                type="button"
-                className={notifyPermission === 'granted' ? `${css.toolButton} ${css.toolButtonActive}` : css.toolButton}
-                disabled={notifyPermission !== 'default'}
-                title={notifyPermission === 'granted'
-                  ? t('notify.on')
-                  : notifyPermission === 'denied' ? t('notify.blocked') : t('notify.enable')}
-                onClick={requestSystemNotify}
-              >
-                🔔
-              </button>
-              : null}
             <button type="button" className={css.toolButton} onClick={() => { setPrefsOpen(true) }} title={t('prefs.open')}>
               ✎
             </button>
@@ -546,7 +609,7 @@ export function BoardView({
                   <button
                     type="button"
                     className={task.id === selectedTask?.id ? `${css.noteCard} ${css.noteCardSelected}` : css.noteCard}
-                    onClick={() => { setSelectedTaskId(task.id); setTab('detail') }}
+                    onClick={() => { setSelectedTaskId(task.id); setTab('detail'); selectBoardSession(lastSessionOf(task)) }}
                   >
                     <span className={[
                       css.noteDot,
@@ -627,23 +690,22 @@ export function BoardView({
               onMarkDone={() => {
                 void run(() => postTasks({ op: 'update', taskId: selectedTask.id, status: selectedTask.status === 'done' ? 'active' : 'done' }))
               }}
-              onNewSession={() => {
-                void run(async () => {
-                  const result = await postTasks({ op: 'newSession', taskId: selectedTask.id })
-                  if (result === undefined) {
-                    window.alert(t('error.op'))
-                    return
-                  }
-                  const sessionId = result.sessionId
-                  if (typeof sessionId === 'string') openSessionWhenReady(sessionId)
-                })
-              }}
+              onNewSession={() => { startSessionFor(selectedTask.id) }}
               onTogglePlanItem={(itemId: string, done: boolean) => {
                 void run(() => postTasks({
                   op: 'update',
                   taskId: selectedTask.id,
                   plan: selectedTask.plan.map(item => item.id === itemId
                     ? { content: item.content, priority: item.priority, deadline: item.deadline, done }
+                    : { content: item.content, priority: item.priority, deadline: item.deadline, done: item.done }),
+                }))
+              }}
+              onPlanDeadline={(itemId: string, deadline: string | undefined) => {
+                void run(() => postTasks({
+                  op: 'update',
+                  taskId: selectedTask.id,
+                  plan: selectedTask.plan.map(item => item.id === itemId
+                    ? { content: item.content, priority: item.priority, deadline, done: item.done }
                     : { content: item.content, priority: item.priority, deadline: item.deadline, done: item.done }),
                 }))
               }}
@@ -666,7 +728,19 @@ export function BoardView({
 
       <section className={css.chatColumn}>
         {boardRef === undefined
-          ? <p className={css.chatEmpty}>{t('chat.empty')}</p>
+          ? <div className={css.chatEmptyBlock}>
+            <span className={css.chatEmptyGlyph} aria-hidden="true">💬</span>
+            <p className={css.chatEmptyText}>{selectedTask === undefined ? t('chat.empty') : t('chat.emptyTask')}</p>
+            {selectedTask === undefined
+              ? null
+              : <button
+                type="button"
+                className={css.chatEmptyNew}
+                onClick={() => { startSessionFor(selectedTask.id) }}
+              >
+                {t('task.newSession')}
+              </button>}
+          </div>
           : (
             <SessionProvider session={boardRef}>
               {renderSlot('board.conversation', {})}
@@ -682,7 +756,7 @@ export function BoardView({
 
 /** The middle column's task detail: purpose, plan, progress, sessions, actions. */
 function TaskDetail({ task, sessionOf, archived, boardSessionId, selectionOf, onOpenBoardSession,
-  onEdit, onMarkDone, onNewSession, onTogglePlanItem, onDelete, t }: {
+  onEdit, onMarkDone, onNewSession, onTogglePlanItem, onPlanDeadline, onDelete, t }: {
   task: TaskRecord
   sessionOf: (id: string) => SessionRow | undefined
   archived: ReadonlySet<string>
@@ -693,6 +767,7 @@ function TaskDetail({ task, sessionOf, archived, boardSessionId, selectionOf, on
   onMarkDone: () => void
   onNewSession: () => void
   onTogglePlanItem: (itemId: string, done: boolean) => void
+  onPlanDeadline: (itemId: string, deadline: string | undefined) => void
   onDelete: () => void
   t: BoardViewProps['t']
 }) {
@@ -755,7 +830,14 @@ function TaskDetail({ task, sessionOf, archived, boardSessionId, selectionOf, on
                 <span className={css.planDetailContent}>{item.content}</span>
                 {item.deadline === undefined
                   ? null
-                  : <span className={css.planDeadline} title={t('plan.deadline')}>◷ {item.deadline}</span>}
+                  : <input
+                    type="date"
+                    className={css.planDeadlineEdit}
+                    value={item.deadline}
+                    aria-label={t('plan.deadline')}
+                    title={t('plan.deadlineEdit')}
+                    onChange={(event) => { onPlanDeadline(item.id, event.target.value === '' ? undefined : event.target.value) }}
+                  />}
               </li>
             ))}
           </ol>}

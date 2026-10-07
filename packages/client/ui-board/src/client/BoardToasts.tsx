@@ -32,7 +32,7 @@ export type BoardToastsProps =
  * longer running completed its work while nobody watched. Mounted for the
  * whole frame through the shell overlay slot, so it works in every panel.
  */
-export function BoardToasts({ useSessions, openSession, t }: BoardToastsProps) {
+export function BoardToasts({ useSessions, openBoardSession, t }: BoardToastsProps) {
   const byId = useSessions(state => state.byId) as Record<string, SessionRow> | undefined
   const rows = useMemo(() => {
     return byId === undefined ? EMPTY_ROWS : Object.values(byId)
@@ -57,14 +57,7 @@ export function BoardToasts({ useSessions, openSession, t }: BoardToastsProps) {
         setToasts(current => current.filter(entry => entry.key !== toast.key))
       }, TOAST_LIFETIME_MS)
     }
-    // The page is a loopback secure context, so the Notification API is
-    // available; a denied permission simply keeps the in-page toast only.
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      for (const row of completed) {
-        new Notification(t('notify.title'), { body: row.displayTitle })
-      }
-    }
-  }, [rows, t])
+  }, [rows])
 
   const dismissToast = (key: string): void => {
     setToasts(current => current.filter(entry => entry.key !== key))
@@ -78,7 +71,7 @@ export function BoardToasts({ useSessions, openSession, t }: BoardToastsProps) {
           key={toast.key}
           type="button"
           className={css.toast}
-          onClick={() => { dismissToast(toast.key); openSession(toast.sessionId) }}
+          onClick={() => { dismissToast(toast.key); openBoardSession(toast.sessionId) }}
         >
           <span className={css.toastBadge}>{t('notify.title')}</span>
           <span className={css.toastTitle}>{toast.title}</span>
