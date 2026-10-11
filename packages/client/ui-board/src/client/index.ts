@@ -228,6 +228,9 @@ export function apply(ctx: ClientContext): void {
     'board.conversation',
     () => ctx.slots.register({
       name: 'board.conversation',
+      // The panel renders the board's own view-tab copy, so it binds this
+      // namespace for its t.
+      locale: NS,
     }, BoardConversationPanel),
   )
   // 2. The sidebar entry that selects the main panel.

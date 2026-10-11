@@ -702,6 +702,44 @@
   background: var(--dsw-static-deepseek-600);
 }
 
+/* ---- Board conversation view tabs ------------------------------------------ */
+
+/* Sticky against the embedded conversation's scrollport, so the switch stays
+   reachable while the transcript scrolls under it. */
+.chatViewTabs {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 6px;
+  background: var(--dsw-alias-bg-canvas);
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+
+.chatViewTab {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.chatViewTab:hover {
+  color: var(--dsw-alias-label-primary);
+  border-color: var(--dsw-alias-border-l1);
+}
+
+.chatViewTabActive {
+  color: var(--dsw-alias-state-business-primary);
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
 /* ---- Calendar --------------------------------------------------------------- */
 
 .calendarBody {

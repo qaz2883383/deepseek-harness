@@ -480,6 +480,98 @@ packages/client/ui-board/
 - 普通新会话（未指定任务）→ 归属"其它"
 - 在会话里更新其它任务 → 应收到报错引导 task_start
 
+### 2026-10-11 · v19.2：修复板建会话发请求报 `{{model}}` 无值（adopt 路径安装模型选择）
+
+**用户报障**：v19.1 修复后，新会话发请求返回"本轮运行失败 prompt variable `{{model}}` has no value for this assembly (section \"deployment:persona-prefix\")"。
+
+**根因**：standard 预设的 persona row 模板引用 `{{model}}`（v19.1 之前没挂预设，无此段，故不报错）；而 `variables.provider/model` 的唯一注入点是 `installModelSelection`（`@deepseek-ai/dsh-agent` 导出）在 `system-prompt/assemble` 瀑布里写入的。正常路径：session-controller `composeAgent` 的 setup 调 `installSelection(agent)` → `selectionFor`（pending projection → 已记录 request header → 默认模型的动态 getter）→ `installModelSelection(agent.ctx, selection)`，且 create 传 `agentOptions`。但 controller 对**已存在的 live agent 走 adopt**（`resolve()` 的 `liveAgent()` / `createOrAdopt()` 的 `if (live !== undefined) return live`）——**adopt 分支不装选择**，板建会话的 agent 是外部创建的 live agent，提示词组装时 `{{model}}` 无值报错。（重启后会自愈：resume 路径有 composeAgent。）
+
+**修复**：
+1. `packages/api/session-controller/src/agent.ts`：`liveAgent()` 与 `createOrAdopt()` 的 adopt 分支调用 `selectionFor(agent)`（install-or-get、WeakMap 幂等）——外部创建的 live agent 被 controller 接管时同样获得模型选择策略。安全性：`modelSelection` projection 由 SessionController 构造函数自己注册，controller 存在则必有；subagent-owned 的会话在装选择前已被排除
+2. `packages/context/tasks/src/index.ts`：newSession 补传 `agentOptions`（`agentDefaultModel.currentSelection()` 的 provider/model，与 session-controller/webhook/subagent 三个先例一致）；注入列表新增 `agentDefaultModel`
+
+**验证**：停 3081 → 全量 build → 重启 → 浏览器任务板"其它"→ 新会话 → 发"1+1=?只回答数字"→ **2 秒回复"2"，无 {{model}} 错误**；会话 header `agentPreset: standard`；自动标题按内容生成（"1+1=?只回答数字"）；测试会话已 detach 清理。
+
+**排障弯路（记录备用）**：① CDP 浏览器里 `browser_type(submit: true)` 的合成 Enter **不触发** dsh 输入框提交（3091 验证已知限制，本轮忘了）——消息一直躺在草稿里，表现为"无 POST、无错误、无回复"的假象，一度误判为连接层故障；实际 HTTP/SSE/cookie/WS gateway（`/api/remote.mux` Node 直连 OPEN）全部正常。**E2E 发消息必须点"发送消息"按钮**。② PS 5.1 `Invoke-WebRequest` 跟随 303 重定向会丢 Set-Cookie 展示（cookie 本身正常且 HttpOnly，`document.cookie` 看不到是预期）；会话事件为 `session.v4.jsonl.zstd`，Node 24 `zlib.zstdDecompressSync` 可直接解。
+
+### 2026-10-11 · v19.1：修复板建会话工具缺失（预设组合）+ 恢复内容化自动标题
+
+**用户报障**：任务会话里的 agent 只有任务板工具（task_*、reply_style、update_preference），exec/write/bash 等全部 unknown tool；且会话标题与内容无关。
+
+**根因一（工具缺失，严重）**：`newSession` 路由裸调 `agents.create({ meta: { cwd } })`——正常创建路径（session-controller `composeAgent`）还要 ① `agentPresets.resolve()` 解析默认预设、② `meta.agentPreset` 记录、③ `setup` 回调里 `presets.mount(agentCtx, id)` 挂载组合。缺了这些，会话只带全局注册的工具（恰好全是 fork 的板工具）——文件/终端/编辑全无。**旧会话自愈**：冷会话恢复走 session-controller 的 resume 路径，自动补组合——重启后打开即恢复。
+
+**根因二（标题无关）**：路由创建时 `sessionTitle.rename(session, "任务名 · 会话")`——rename 追加 user 来源的 `session/title` 事件，**永久钉定**标题（服务文档明言：in-flight 自动生成被取代、后续用户消息不再排程）——LLM 内容标题机制（session-title-first-prompt-llm / all-prompts-llm + 首条消息回退）被掐死。
+
+**修复**（`packages/context/tasks/src/index.ts`）：
+- newSession 组合化：`agentPresets.resolve(undefined)` 取默认预设 → `meta.agentPreset` + `setup: async (agentCtx) => { await mount(...) }`；`AgentPresetsLike` 结构类型新增，注入列表以 `agentPresets` 替换不再使用的 `sessionTitle`
+- 删除静态 rename，自动标题回归（首条消息回退 / LLM 生成，视组合而定）
+- **踩坑**：setup 回调的返回值会被当作 commit 句柄调用（agent-loop L775-776 `setupCommit?.commit()`）——首版把 `mount()` 的返回值（AgentPreset 元数据对象）return 出去，报 `setupCommit?.commit is not a function`；必须返回 void（所有上游先例皆如此，返 void 则 `?.` 空跳）
+
+**验证**：重建后经路由建会话成功，projcache `rows.agentPreset: standard`——完整工具组合已挂载；测试会话已 detach 清理。
+
+**待用户验收**（强刷）：任务下开新会话 → 让 agent 写个测试文件 → 应成功且落在 `tasks/<任务目录>/`；旧任务会话（重启后首次打开）工具也应恢复；新会话发第一条消息后标题应与内容相关。
+
+### 2026-10-11 · v19：任务目录升级——创建即建、标题化命名、重名编号、改名跟随、删除打标
+
+**用户规格**：① task 创建时同步创建文件夹；② task 可重名，需要重名/重命名/文件夹关联机制；③ 删除 task 不删文件夹，但文件夹名打已删除标记。
+
+**设计**（v18 的 `tasks/<id>/` 方案升级为标题化方案）：
+
+- **命名**：`dirName = 标题清洗（Windows 非法字符→空格、去尾点空格、60 字上限）`，中文标题原样保留；空标题回退 `untitled`
+- **关联**：`TaskRecord` 新增 `dirName` 字段（记录↔文件夹的唯一纽带）；README 同步列出任务 ID + 输出目录
+- **重名**：`uniqueDirName`——期望名被其它任务认领或磁盘已占则 `-2`、`-3` 递增
+- **改名跟随**：`syncTaskDir` 发现 `dirName ≠ 期望名` 即重命名磁盘目录（编号防撞；`untitled` 不触发改名防误清空标题导致误迁移；rename 失败保旧名并告警）
+- **创建即建**：`resolveAnchorCwd` 锚定链（payload.cwd → 最新活跃会话 cwd → 注册工作区：单一即取/多取最新 → process.cwd()）——`WorkspaceRegistryLike` 加宽 `list()`，创建路由必然拿到根，目录随记录落地
+- **删除打标**：`markTaskDirDeleted` → `<dirName>.deleted`（冲突 `.deleted-2`），同名后继拿全新目录
+- **迁移**：启动回填顺带处理 v18 遗留——无 `dirName` 的记录若存在 id 命名目录则**改名**为标题目录（`task-5f52cb1b` → `AI模型量化学习`，`task-misc` → `其它`），有则沿用；回填后统一写回 tasks.json
+- **briefing**：输出目录条目改用 `dirName`；七个同步点全部改为 `syncTaskDir`（返回值可能是带新 dirName 的记录，调用方落盘前 splice 回写）
+
+**验证**（经 `/tasks` 路由全链路实测，token 从首页 meta 标签取）：创建→`测试任务A`；重名创建→`测试任务A-2`；改名→目录跟随为`测试任务B`；删除→`测试任务A-2.deleted`；迁移→两个存量任务目录与 tasks.json dirName 均正确。测试数据已清理。
+
+**两个过程坑**：① PowerShell 5.1 `Invoke-RestMethod` 字符串体按 Latin-1 发送且响应按 Latin-1 解码——测试端乱码假象（磁盘目录名正确），改 UTF-8 字节体验证；② v18 服务停止时 tsx 的 node 子进程未被杀净导致 EADDRINUSE（PID 遗留），`Get-NetTCPConnection` 定位强杀后正常——StopCommand 杀进程树不可靠，重启失败先查端口。
+
+**待用户验收**：板内新建任务（重名试一次）→ 资源管理器看 `tasks/` 目录即时出现/编号；编辑任务改标题 → 目录改名；删除任务 → 目录变 `.deleted` 且文件保留。
+
+### 2026-10-09 · v18：任务输出目录——每任务独立文件夹 + 全会话文件落盘约定
+
+**用户规格**：按 task 组织工作，每个 task 有自己独立的文件夹存放输出；task 下所有会话的文件操作都应先在本 task 自己的目录下落盘。
+
+**可行性结论（先调研后动手）**：
+- 会话 cwd ≠ 工作区根在结构上被禁止：WorkspaceRegistry 按会话 canonical cwd **精确匹配**工作区路径决定成员归属（`workspace/src/index.ts` reportFilteredCandidates——cwd 不一致的会话被过滤出工作区，板内就看不到）；且 fs 沙箱可写根（`sandbox/src/roots.ts`）与文件 API confine 根全部链在 `header.cwd` 上。"会话 cwd=任务子目录"需要 fork 注册表，否决
+- "每任务一个 workspace"同样否决：板子的会话列表/打开逻辑全部假设单一工作区，跨工作区重构代价远超收益
+- **采纳：目录机制（host 保障）+ briefing 约定注入（每次请求生效）+ P2 钩子强制（将来）**
+
+**实现**（`packages/context/tasks/src/index.ts`，host 单文件）：
+- `ensureTaskDir(cwd, task)`：在工作区根下建 `tasks/<id>/` + 重写自述 README（标题/状态/分类/创建日期/目标，标注 AUTO-GENERATED）；尽力而为，fs 失败仅告警
+- **七个保障点**：`/tasks` 路由 create / update / newSession / attachSession 四个 op + `task_create` / `task_update` / `task_start` 三个工具——凡拿到 (task, cwd) 就确保目录（newSession 用 workspace.path；attachSession 经 sessions 列表反查；路由编辑 op 复用 resolveNewSessionCwd；工具用 exec.agent.session.header.cwd）
+- **briefing 约定**：`renderBriefing` 第二行新增输出目录条目（相对路径 `tasks/<id>/`，指明工作区根即会话工作目录，"产出文件先落此，它处仅用户明示"）——`tasks:briefing` 是 systemPrompt 运行时上下文，每个请求自动携带，免任何额外接线
+- **启动回填**：`ctx.inject(['sessionPersistence'])` 读存量会话头的 cwd，为有历史的任务补建目录（无会话任务等首次接触再建）；删除任务**不删目录**（产出比记录活得久）
+- SessionsLike 结构类型加宽（header 补 id），模块头注释更新
+
+**踩坑**：Cordis 上下文是代理——服务属性必须在注入 scope 上读。首版在异步闭包里读了外层 `ctx.sessionPersistence`，报 `cannot get property without inject`；改为回调内同步捕获服务对象再进异步（该文件自己的注释早就警告过这事，见贤思齐）。
+
+**部署**：停 3081 → build（又遇 inspector devtools 瞬时 EPERM，清临时产物重试即过）→ 重启。验证：启动后自动建出 `tasks/task-5f52cb1b/`、`tasks/task-misc/`（README 正确）；手工把工作区根部的《LLM量化知识梳理与学习计划.md》归位进量化任务的目录（还原：`Move-Item tasks\task-5f52cb1b\LLM量化知识梳理与学习计划.md .`）；HTTP 200。
+
+**与 P1 的衔接**：场景记录的 `persist.directory` 默认值改为 `tasks/{{task.id}}/`（原设计 `notes/{{task.slug}}/` 作废）——P2 提取钩子直接落任务目录。硬约束（写权限 jailed 到任务目录）列为 P3 选项（fork sandbox-policy 的 workspaceRoot 派生）。
+
+**待用户验收**：板内任一任务开新会话 → 让 agent 写个测试文件 → 应落在 `tasks/<任务id>/` 下；切到别的任务再试一次。
+
+### 2026-10-06 · v17.6：恢复板内"agent 请求过程"视图——嵌入会话加视图切换条（对话/轨迹）
+
+**用户规格**：原生会话窗口有显示 agent 请求过程的窗口，我们的版本丢失了，要求加回。
+
+**根因**：板内嵌入会话的 `FixedChatConversationView` 把 `conversation.session` 的 `view` prop 钉死为 `'chat'`——原生视图切换 tab 在 `ConversationSessionHeader`（嵌入变体无 header），且即便放开也会被钉死值覆盖。所谓"过程窗口"即 ui-trajectory 注册的**轨迹视图**（请求头/工具/消息/压缩的全程图谱；其 tab 受 `developerTools` 配置门控，用户原生端已开启）。
+
+**修复**（`ui-board`，`BoardConversationPanel.tsx` 重写）：
+
+- 删 `FixedChatConversationView`（chat 钉死）；新增 `BoardConversationViews`：**粘性 tab 条（对话 | 轨迹，沿用原生文案）+ `renderSlot('conversation.session', { view })`**，view 由板持有（useState + useMemo 稳定包装组件，无关重渲染不 remount 会话；切视图本身 remount，与原生"换内容"语义一致）
+- `board.conversation` 槽注册加 `locale: NS`（面板需要 board 自己的 t；注意 `ConversationViewsProps` 自带 conversation 命名空间的 t，板方翻译以 `bt` 传参避开类型相交冲突——本次构建踩到后改名）
+- 新文案 `chatview.chat/chatview.trajectory`（zh: 对话/轨迹，en: Chat/Trajectory，与 ui-chat/ui-trajectory 原生 tab 文案一致）；CSS `chatViewTabs/chatViewTab(Active)`：sticky 置顶、底边框分隔
+
+**部署**：停 3081 → 全量 build（363 artifacts；首次构建报 t 类型相交错误，改名 bt 后通过）→ 重启 3081。
+
+**待用户验收**（刷新浏览器）：板内右栏顶部应出现 [对话 | 轨迹] 切换条；点"轨迹"→ 显示 agent 请求过程图谱（请求/工具/消息分组）；切回"对话"正常聊天；列表滚动时切换条保持吸顶。注意轨迹 tab 在原生端同样需要设置里开启开发者工具（已开启则直接可用）。
+
 ### 2026-10-06 · v17.5：两项批次——移除 🔔 系统通知开关（用户判定无用）+ 计划闭环日期详情内联可编辑
 
 **用户规格**：① 铃铛按钮（系统通知已开启）没用就去掉；② 计划项有时间时，点击时间可修改，日历同步。

@@ -399,9 +399,14 @@ export class ApiSessionAgentController {
   private liveAgent(sessionId: SessionId): ApiSessionAgentResult | undefined {
     const agent = this.ctx.agents.get(sessionId)
     if (agent === undefined) return undefined
-    return hasApiSessionSubagentOwner(this.ctx, agent.session, agent)
-      ? { error: apiSessionSubagentOwnershipError(sessionId) }
-      : { agent }
+    if (hasApiSessionSubagentOwner(this.ctx, agent.session, agent)) {
+      return { error: apiSessionSubagentOwnershipError(sessionId) }
+    }
+    // Adopt an externally created live Agent (board/webhook creation routes)
+    // under the controller's model-selection policy: prompt assembly resolves
+    // the strict `{{model}}` variable only through an installed selection.
+    this.selectionFor(agent)
+    return { agent }
   }
 
   private async resume(sessionId: SessionId, supplied?: SessionObservation): Promise<Agent> {
@@ -452,7 +457,12 @@ export class ApiSessionAgentController {
     if (attached !== undefined && hasApiSessionSubagentOwner(this.ctx, attached, live)) {
       throw new ApiSessionSubagentOwnership(sessionId)
     }
-    if (live !== undefined) return live
+    if (live !== undefined) {
+      // Same adoption policy as liveAgent(): an externally created live Agent
+      // still needs the controller's selection installed before use.
+      this.selectionFor(live)
+      return live
+    }
 
     if (checkPersistedIdentity) {
       try {
