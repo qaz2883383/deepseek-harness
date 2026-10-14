@@ -1100,6 +1100,25 @@ function ScenarioCanvas({ stages, openId, layoutEpoch, onOpen, onStagesChange, t
         onEdgeDoubleClick={(_event, edge) => { if (isRealEdge(edge)) onEdgesDelete([edge]) }}
         onNodeDragStop={(_event, node) => { commitPositions([node]) }}
         onNodeClick={(_event, node) => { if (!node.id.startsWith('__')) onOpen(node.id) }}
+        connectionRadius={40}
+        onConnectEnd={(event, state) => {
+          // Fallback: the drag ended on a node body (not a handle) — still
+          // honor set-root / set-sink gestures for the boundary nodes.
+          if (state.isValid) return
+          const fromHandle = state.fromHandle
+          if (fromHandle === null) return
+          const sourceId = fromHandle.nodeId
+          const point = 'touches' in event
+            ? (event.touches[0] ?? event.changedTouches[0])
+            : event
+          const hit = point === undefined ? null : document.elementFromPoint(point.clientX, point.clientY)
+          const targetEl = hit === null ? null : hit.closest('.react-flow__node')
+          const targetId = targetEl?.getAttribute('data-id')
+          if (sourceId === undefined || targetId === null || targetId === undefined || targetId === sourceId) return
+          if (sourceId === FLOW_IN_ID || targetId === FLOW_OUT_ID) {
+            onConnect({ source: sourceId, target: targetId, sourceHandle: fromHandle.id ?? null, targetHandle: null })
+          }
+        }}
         fitView
         fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
         minZoom={0.3}

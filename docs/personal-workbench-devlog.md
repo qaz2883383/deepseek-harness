@@ -510,6 +510,8 @@ packages/client/ui-board/
 
 **验证**（浏览器实测，click-connect 模式）：click 入口 handle → click scout → dirty 出现 ✓，clarify→scout 实线消失、虚线重指 ✓；放弃更改 → 完整回滚 ✓。**踩坑**：CDP 合成拖拽连线序列在 ghost handle 上不稳定（drag 阈值/中点路径耦合），click-connect（两次 click）模式稳定可靠——与真实鼠标行为等价。
 
+**v27.1 补丁（用户反馈"连线后马上消失"）**：真实用户拖拽落点常在**节点身体**而非精确端口（默认容差仅 20px，超差即取消——拖出的预览线落下即消失，正是"马上消失"的现象）。三层加固：① `connectionRadius={40}`（端口容差翻倍）；② **onConnectEnd 兜底**——拖到节点 body 上松手也识别 set-root/set-sink 手势（`elementFromPoint(clientX/Y)` 定位落点节点，只对边界节点语义生效；注意合成事件 `event.target` 是 document 不可靠，必须用坐标反查）；③ ghost 端口视觉放大（12px + 2px 边框）更易命中。CDP 端 handle→handle 主路径已实测 dirty=true（180 轮分轮 drag），body fallback 因 CDP 嵌套滚动坐标失真未能自动化复现，留待用户实测确认。
+
 ### 2026-10-14 · v24：P2.5 落地——四种控制节点（human/switch/tool/notify）+ 回边下绕画法
 
 **动机**：用户实测画布后三项反馈——① 连线乱（回边与主链交叉）；② FAIL 标签盖住灰线分不清归属；③ 上轮分析的四个缺口节点（人工确认/智能路由/工具执行/通知）全部实现。
