@@ -418,6 +418,7 @@
       "@deepseek-ai/dsh-plan-mode": ["./packages/plan/plan-mode/src"],
       "@deepseek-ai/dsh-plugin-package-inventory-deepseek": ["./packages/llm/plugin-package-inventory-deepseek/src"],
       "@deepseek-ai/dsh-preferences": ["./packages/context/preferences/src"],
+      "@deepseek-ai/dsh-scenarios": ["./packages/context/scenarios/src"],
       "@deepseek-ai/dsh-tasks": ["./packages/context/tasks/src"],
       "@deepseek-ai/dsh-ptc-runtime": ["./packages/ptc-runtime/ptc-runtime/src"],
       "@deepseek-ai/dsh-ptc-runtime-node": ["./packages/ptc-runtime/ptc-runtime-node/src"],

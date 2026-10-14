@@ -81,6 +81,10 @@
     # Personal workbench: first-class task records for the task board.
     - id: tasks
       name: '@deepseek-ai/dsh-tasks'
+    # Personal workbench: scenario orchestration records (stage disciplines,
+    # output contracts) injected per task; serves the /scenarios route.
+    - id: scenarios
+      name: '@deepseek-ai/dsh-scenarios'
 
     # Session-header "Open In..." split button over the host application
     # resolution (macOS/Windows/Linux; a host with no resolved application

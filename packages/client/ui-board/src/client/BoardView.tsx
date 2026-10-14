@@ -5,6 +5,7 @@ import type { ScheduleCatalogEntry } from '@deepseek-ai/dsh-schedule/client'
 import type { PropsLocale, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { UseSessions } from '@deepseek-ai/dsh-client-ui-session/client'
 import { subscribeBoardSession, takeRequestedBoardSession, type BoardInjected } from './index.ts'
+import { BoardScenariosPanel, fetchScenarios, type ScenarioRecord } from './BoardScenariosPanel.tsx'
 import { NS } from './locales.ts'
 import css from './BoardAction.module.css'
 
@@ -27,6 +28,8 @@ interface TaskRecord {
   readonly status: 'active' | 'done'
   readonly category: 'work' | 'learning'
   readonly pinned?: boolean
+  /** Explicit scenario selection (dsh-scenarios record id); absent = category default. */
+  readonly scenario?: string
   readonly createdAt: number
   readonly updatedAt: number
   readonly sessions: readonly string[]
@@ -59,7 +62,7 @@ interface PreferencesState {
 type WallFilter = 'all' | 'running' | 'done'
 
 /** The middle column's tab. */
-type DetailTab = 'detail' | 'calendar'
+type DetailTab = 'detail' | 'calendar' | 'scenarios'
 
 /** Mirror of the host tasks plugin's catch-all task id (task-misc). */
 const MISC_TASK_ID = 'task-misc'
@@ -668,8 +671,17 @@ export function BoardView({
           >
             {t('tab.calendar')}
           </button>
+          <button
+            type="button"
+            className={tab === 'scenarios' ? `${css.detailTab} ${css.detailTabActive}` : css.detailTab}
+            onClick={() => { setTab('scenarios') }}
+          >
+            {t('tab.scenarios')}
+          </button>
         </div>
-        {tab === 'calendar'
+        {tab === 'scenarios'
+          ? <BoardScenariosPanel t={t} />
+          : tab === 'calendar'
           ? <CalendarPanel
             events={events}
             boardSessionId={boardSessionId}
@@ -1089,9 +1101,15 @@ function TaskEditor({ task, onClose, onSaved, t }: { task: TaskRecord | undefine
   const [title, setTitle] = useState(task?.title ?? '')
   const [purpose, setPurpose] = useState(task?.purpose ?? '')
   const [category, setCategory] = useState<'work' | 'learning'>(task?.category ?? 'work')
+  const [scenarioSel, setScenarioSel] = useState(task?.scenario ?? '')
+  const [scenarios, setScenarios] = useState<readonly ScenarioRecord[]>([])
   const [plan, setPlan] = useState<PlanItem[]>(() => (task?.plan ?? []).map(item => ({ ...item })))
   const [progress, setProgress] = useState(task?.progress ?? '')
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    void (async () => { setScenarios((await fetchScenarios()) ?? []) })()
+  }, [])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -1144,7 +1162,7 @@ function TaskEditor({ task, onClose, onSaved, t }: { task: TaskRecord | undefine
         }))
       await postTasks(task === undefined
         ? { op: 'create', title, purpose, category, plan: planPayload }
-        : { op: 'update', taskId: task.id, title, purpose, category, plan: planPayload, progress })
+        : { op: 'update', taskId: task.id, title, purpose, category, plan: planPayload, progress, scenario: scenarioSel === '' ? null : scenarioSel })
       onSaved()
     } finally {
       setSaving(false)
@@ -1184,6 +1202,21 @@ function TaskEditor({ task, onClose, onSaved, t }: { task: TaskRecord | undefine
             </button>
           </div>
         </div>
+        {task === undefined ? null : (
+          <label className={css.prefsField}>
+            <span className={css.prefsFieldLabel}>{t('tab.scenarios')}</span>
+            <select
+              className={css.taskTitleInput}
+              value={scenarioSel}
+              onChange={(event) => { setScenarioSel(event.target.value) }}
+            >
+              <option value="">{t('sc.followCategory')}</option>
+              {scenarios.map(scenario => (
+                <option key={scenario.id} value={scenario.id}>{scenario.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className={css.prefsField}>
           <span className={css.prefsFieldLabel}>{t('task.purpose')}</span>
           <textarea

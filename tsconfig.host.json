@@ -359,6 +359,7 @@
     { "path": "./packages/interaction/tool-ask-user" },
     { "path": "./packages/context/agent-instructions" },
     { "path": "./packages/context/preferences" },
+    { "path": "./packages/context/scenarios" },
     { "path": "./packages/context/tasks" },
     { "path": "./packages/core/agent-loop" },
     { "path": "./packages/llm/llm-retry" },

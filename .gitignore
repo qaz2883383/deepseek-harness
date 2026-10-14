@@ -46,3 +46,11 @@ worktrees/
 .agents/worktrees/
 .typert-*/
 native/system/test/bin/
+# dependency-install scratch + tsc build artifacts that land in src/ via project references
+.npm-cache-tmp/
+.pnpm-store-tmp/
+.npmrc
+packages/**/src/**/*.js
+packages/**/src/**/*.js.map
+packages/**/src/**/*.d.ts
+packages/**/src/**/*.d.ts.map

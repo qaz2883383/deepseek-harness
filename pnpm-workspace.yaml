@@ -14,6 +14,11 @@ packages:
   # closure is what the exe bundles and what the Python runtime distributes.
   - python/sdk-runtime
 
+# Sandbox environments block pnpm's store writes, so the pre-run dependency
+# check (which auto-installs) must stay off: builds run against the workspace
+# links that already exist.
+verifyDepsBeforeRun: false
+
 overrides:
   'extract-zip>yauzl': '3.4.0'
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'

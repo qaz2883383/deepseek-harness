@@ -69,6 +69,11 @@ export interface TaskRecord {
    * that carries a workspace root (task creation, conversation contact).
    */
   readonly dirName?: string
+  /**
+   * Explicit scenario-orchestration selection (a dsh-scenarios record id).
+   * Absent means the task runs its category's scenario (learning / work).
+   */
+  readonly scenario?: string | undefined
   readonly createdAt: number
   readonly updatedAt: number
   readonly sessions: string[]
@@ -188,9 +193,13 @@ function isRecord(value: unknown): value is TaskRecord {
 /** Migrate one validated record: legacy tasks without a category default to work. */
 function migrateRecord(record: TaskRecord): TaskRecord {
   const category = record.category === 'work' || record.category === 'learning' ? record.category : 'work'
-  return category === record.category && (record.pinned === undefined || typeof record.pinned === 'boolean')
-    ? record
-    : { ...record, category, pinned: record.pinned === true ? true : undefined }
+  const scenario = typeof record.scenario === 'string' && record.scenario !== '' ? record.scenario : undefined
+  const pinned = record.pinned === true ? true : undefined
+  if (category === record.category && scenario === record.scenario && (pinned === undefined || record.pinned === pinned)) {
+    return record
+  }
+  const { scenario: _dropped, ...rest } = record
+  return { ...rest, category, pinned, ...(scenario === undefined ? {} : { scenario }) }
 }
 
 /** Read the task list; a missing or malformed file means no tasks. */
@@ -673,6 +682,10 @@ function serveTasksApi(scope: Context, dir: string): void {
             if (payload.category === 'work' || payload.category === 'learning') next.category = payload.category
             if (payload.pinned === true) next.pinned = true
             else if (payload.pinned === false) next.pinned = undefined
+            // Explicit scenario selection: a non-empty string sets it, null or
+            // an empty string clears it back to the category default.
+            if (typeof payload.scenario === 'string' && payload.scenario !== '') next.scenario = payload.scenario
+            else if (payload.scenario === null || payload.scenario === '') delete next.scenario
             if (Array.isArray(payload.plan)) next.plan = normalizePlan(payload.plan)
             if (payload.status === 'active' || payload.status === 'done') next.status = payload.status
             tasks.splice(tasks.indexOf(task), 1, next)

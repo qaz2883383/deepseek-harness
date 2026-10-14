@@ -141,6 +141,7 @@
     "@deepseek-ai/dsh-plan-mode": "workspace:*",
     "@deepseek-ai/dsh-plugin-manager": "workspace:*",
     "@deepseek-ai/dsh-preferences": "workspace:*",
+    "@deepseek-ai/dsh-scenarios": "workspace:*",
     "@deepseek-ai/dsh-tasks": "workspace:*",
     "@deepseek-ai/dsh-schedule": "workspace:*",
     "@deepseek-ai/dsh-session-log-export": "workspace:*",
