@@ -946,15 +946,20 @@ function ScenarioCanvas({ stages, openId, layoutEpoch, onOpen, onStagesChange, t
   const [edges, setEdges, onEdgesChange] = useEdgesState(canvasEdges(stages))
 
   // External stage edits (property panel, toolbar add) resync the canvas.
+  // Selection must survive the rebuild: pressing Delete removes exactly the
+  // selected nodes/edges, and React Flow reads `selected` off these objects.
   useEffect(() => {
     setNodes(current => canvasNodes(stages, openId).map(node => {
       if (node.id === FLOW_IN_ID || node.id === FLOW_OUT_ID) return node
       const existing = current.find(item => item.id === node.id)
       if (existing === undefined) return node
       const stagePosition = stages.find(stage => stage.id === node.id)?.position
-      return { ...node, position: stagePosition ?? existing.position }
+      return { ...node, position: stagePosition ?? existing.position, ...(existing.selected === true ? { selected: true } : {}) }
     }))
-    setEdges(canvasEdges(stages))
+    setEdges(current => canvasEdges(stages).map(edge => {
+      const existing = current.find(item => item.id === edge.id)
+      return existing === undefined ? edge : { ...edge, ...(existing.selected === true ? { selected: true } : {}) }
+    }))
   }, [stages, openId, setNodes, setEdges])
 
   const commitPositions = (updated: readonly Node[]): void => {
@@ -1034,7 +1039,16 @@ function ScenarioCanvas({ stages, openId, layoutEpoch, onOpen, onStagesChange, t
   }
 
   return (
-    <div className={css.scCanvas} aria-label={t('sc.canvas.label')}>
+    // Focusable wrapper: clicking anywhere in the canvas (capture phase —
+    // React Flow stops node mousedown propagation) moves focus away from
+    // inputs like the chat composer, otherwise React Flow ignores Delete
+    // presses that land inside an input DOM node.
+    <div
+      className={css.scCanvas}
+      tabIndex={0}
+      aria-label={t('sc.canvas.label')}
+      onMouseDownCapture={(event) => { event.currentTarget.focus() }}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}

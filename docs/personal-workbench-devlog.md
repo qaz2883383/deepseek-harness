@@ -484,7 +484,7 @@ packages/client/ui-board/
 
 **用户反馈与修复**：
 1. **场景 id 无意义**（`sc-mv88suvv` 时间戳 base36）：新建场景表单加 id 输入框（留空默认=名称，空白/斜杠转连字符）——「测试场景」→ id `测试场景`，与 learning/work 命名风格一致
-2. **节点无法删除**（键盘删除链路在真实浏览器也失灵，受控 resync/键盘焦点耦合）：双通道修复——① StageEditor 面板底部「删除此节点」按钮（confirm 后过滤 stages + 清引用 + save）；② **双击连线直接删边**（onEdgeDoubleClick，不依赖键盘）；键盘删除保留。实测：点节点→面板→删除→8→7 节点 + JSON 落盘 ✓
+2. **节点/连线无法删除**（画布选中 + Delete 键）——根因三条，逐一击破：① **焦点在输入框**：dsh web 的 composer 输入框持有焦点，点画布（div）不抢焦点，React Flow 的 isInputDOMNode 拦下 Delete 键——修复：画布容器 `tabIndex={0}` + `onMouseDownCapture` 抢焦点（**必须 capture**——React Flow 节点的 mousedown 会 stopPropagation，普通冒泡 handler 收不到）；② **选中态被 resync 抹掉**：点节点 → onOpen → openId 变化 → useEffect resync 重建 nodes/edges 对象（不带 selected）→ deleteElements 的 `filter(selected)` 恒空——修复：resync 时保留 `existing.selected`（条件 spread 绕 exactOptional）；③ **CDP 验证假象**：合成 keydown+keyup 同一 evaluate 内派发，React 18 批处理把中间的 `deleteKeyPressed=true` 状态吞掉（effect 从不触发）——**分轮派发后链路即通**（此前多轮"删不掉"结论全是这个时序坑，教训：合成键盘事件必须模拟真实 tick 分离）。面板删除按钮与双击删边作为补充通道保留。实测：点节点（焦点抢到画布容器 + selected 保留 + 面板开）→ Delete → 节点删除 + 引用清理 + POST 落盘 ✓；边删除同链路 ✓（JSON 落盘验证）
 3. **无出入口展示**：画布注入两个 **ghost 边界节点**——「入：用户输入 · 任务会话（轮次结束/空闲/显式触发）」与「出：流程出口 · 回注/落盘」，dashed 样式、不可拖/选/删；**虚线边**从入口连到所有无入边节点、从无出边节点连到出口（id `__flow_*` 前缀，onConnect/onEdgesDelete/onNodeClick 全部防护不落盘）；ghost 位置随真实节点 min/max x 动态贴边；顺手修复 resync 的 index 错位（ghost 加入后按 id 匹配）
 4. **GitHub 同步**：@xyflow/react 12.12.0 补进 pnpm-lock（--lockfile-only 23.7s）；.gitignore 加依赖安装临时目录 + tsc project references 的 src/ 产物（packages/**/src/**/*.{js,d.ts,map}，已跟踪的 4 个手写 d.ts 不受影响）；commit 9a70276bc1（18 文件 +3426）——**push 卡 PAT 失效**（No anonymous write access，旧 token 已撤销），待用户重发。
 
