@@ -200,7 +200,8 @@ export function BoardScenariosPanel({ t }: { t: ScenariosT }): React.JSX.Element
   )
 }
 
-/** The graph-as-editor pipeline: vertical stage flow with per-node editing. */
+/** The graph-as-editor pipeline: vertical stage flow with per-node editing.
+ * Edits stay in a local draft until the user presses save. */
 function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
   scenario: ScenarioRecord
   onChanged: () => void
@@ -208,16 +209,18 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
   t: ScenariosT
 }): React.JSX.Element {
   const [stages, setStages] = useState<readonly StageRecord[]>(() => effectiveStages(scenario))
+  const [baseline] = useState<readonly StageRecord[]>(() => effectiveStages(scenario))
   const [openId, setOpenId] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
   const [layoutEpoch, setLayoutEpoch] = useState(0)
+  const dirty = JSON.stringify(stages) !== JSON.stringify(baseline)
 
-  const save = async (next: readonly StageRecord[]): Promise<void> => {
+  const save = async (): Promise<void> => {
     setSaving(true)
     try {
       await postScenarios({
         op: 'save',
-        scenario: { ...scenario, stages: next },
+        scenario: { ...scenario, stages },
       })
       onChanged()
     } finally {
@@ -229,7 +232,6 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
     const next = [...stages]
     mutate(next)
     setStages(next)
-    void save(next)
   }
 
   const patchStage = (id: string, patch: Partial<StageRecord>): void => {
@@ -246,6 +248,20 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
       <div className={css.scenarioDetailHead}>
         <h3 className={css.scenarioDetailName}>{scenario.name}</h3>
         <div className={css.scenarioDetailActions}>
+          {dirty ? (
+            <>
+              <button type="button" className={css.prefsPrimary} disabled={saving} onClick={() => { void save() }}>
+                {t('sc.apply')}
+              </button>
+              <button
+                type="button"
+                className={css.scenarioAction}
+                onClick={() => { setStages(effectiveStages(scenario)); setOpenId(undefined) }}
+              >
+                {t('sc.discard')}
+              </button>
+            </>
+          ) : null}
           <button type="button" className={css.scenarioAction} onClick={onEdit}>
             {t('sc.edit')}
           </button>
@@ -268,7 +284,7 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
       </div>
       <p className={css.scenarioDesc}>{scenario.description}</p>
       <p className={css.scHint}>{t('sc.diagramHint')}</p>
-      {saving ? <p className={css.scHint}>{t('sc.saving')}</p> : null}
+      {saving ? <p className={css.scHint}>{t('sc.saving')}</p> : dirty ? <p className={css.scHint}>{t('sc.unsaved')}</p> : null}
       <div className={css.scCanvasToolbar}>
         {ADDABLE_KINDS.map(kind => (
           <button
@@ -295,9 +311,7 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
           type="button"
           className={css.scCanvasAdd}
           onClick={() => {
-            const next = layoutStages(stages)
-            setStages(next)
-            void save(next)
+            setStages(layoutStages(stages))
             setLayoutEpoch(epoch => epoch + 1)
           }}
         >
@@ -309,7 +323,7 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
         openId={openId}
         layoutEpoch={layoutEpoch}
         onOpen={(id) => { setOpenId(id === openId ? undefined : id) }}
-        onStagesChange={(next) => { setStages(next); void save(next) }}
+        onStagesChange={setStages}
         t={t}
       />
       {open === undefined ? null : (
@@ -317,9 +331,7 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
           stage={open}
           onPatch={(patch) => { patchStage(open.id, patch) }}
           onDelete={() => {
-            const next = stages.filter(stage => stage.id !== open.id)
-            setStages(next)
-            void save(next)
+            setStages(stages.filter(stage => stage.id !== open.id))
             setOpenId(undefined)
           }}
           t={t}

@@ -490,6 +490,14 @@ packages/client/ui-board/
 
 **踩坑**：PowerShell 无 bash heredoc（git commit -m "$(cat <<'EOF')" 直接语法错误）——多 -m 参数分段替代。
 
+### 2026-10-14 · v26：草稿-显式保存模式（用户反馈"误改风险"）
+
+**改动**：ScenarioPipeline 从"任何画布编辑立即 POST"改为**草稿模式**——连线/删边/删节点/拖拽 position/属性面板 patch/工具栏加节点/自动排列全部只进本地 state；头部出现「保存更改」（主按钮）+「放弃更改」+ 未保存提示行，点击保存才 POST 落盘（保存后 key=updatedAt 重挂、baseline 重置）；放弃则回滚到打开时的服务器版本。dirty 判定 = JSON.stringify(stages) 与 baseline 比较。
+
+**验证**（浏览器实测）：初始无按钮（clean）✓ → 加节点 → 保存/放弃按钮 + 未保存提示出现 ✓ → 放弃 → 节点回滚、按钮消失 ✓ → 加通知节点 → 保存 → JSON 落盘 ✓。
+
+**踩坑（数据层竞态）**：验证期间发现 learning 场景的 review 关卡意外丢失——上一轮键盘删除测试的 **POST（全量重写 scenarios.json）与我的手工 JSON 恢复发生竞态**，POST 用旧 draft 覆盖了手工编辑。教训：**服务器运行期间不要手工并发编辑 scenarios.json**（writeScenarios 是全量重写，没有读改写保护）；测试后清理一律走 UI 或确认无在途 POST。已手工恢复 review（rubric/rework/branch pass+fail）并清掉测试 notify 节点。
+
 ### 2026-10-14 · v24：P2.5 落地——四种控制节点（human/switch/tool/notify）+ 回边下绕画法
 
 **动机**：用户实测画布后三项反馈——① 连线乱（回边与主链交叉）；② FAIL 标签盖住灰线分不清归属；③ 上轮分析的四个缺口节点（人工确认/智能路由/工具执行/通知）全部实现。
