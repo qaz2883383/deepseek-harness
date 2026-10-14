@@ -498,6 +498,18 @@ packages/client/ui-board/
 
 **踩坑（数据层竞态）**：验证期间发现 learning 场景的 review 关卡意外丢失——上一轮键盘删除测试的 **POST（全量重写 scenarios.json）与我的手工 JSON 恢复发生竞态**，POST 用旧 draft 覆盖了手工编辑。教训：**服务器运行期间不要手工并发编辑 scenarios.json**（writeScenarios 是全量重写，没有读改写保护）；测试后清理一律走 UI 或确认无在途 POST。已手工恢复 review（rubric/rework/branch pass+fail）并清掉测试 notify 节点。
 
+### 2026-10-15 · v27：入口/出口节点可交互（用户反馈"端点无法选中、无法连"）
+
+**问题**：v25 的 ghost 边界节点是纯装饰（`isConnectable={false}` + `selectable: false`），但视觉上渲染着端口圆点——用户以为能连却连不上，交互困惑。
+
+**修复**：把边界节点升级为**有明确语义的可交互节点**——
+- **入口端口连到某节点 = 把它设为流程起点**（自动清除指向它的所有 next/branch 引用，虚线随之自动指向它）
+- **节点连到出口端口 = 把它设为流程终点**（清除它的所有出边）
+- 节点本身改为可选中（不可拖/不可删维持）——统一交互预期
+- meta 文案改为操作引导："拖右侧端口到节点 = 设为流程起点"/"把节点连到左侧端口 = 设为流程终点"
+
+**验证**（浏览器实测，click-connect 模式）：click 入口 handle → click scout → dirty 出现 ✓，clarify→scout 实线消失、虚线重指 ✓；放弃更改 → 完整回滚 ✓。**踩坑**：CDP 合成拖拽连线序列在 ghost handle 上不稳定（drag 阈值/中点路径耦合），click-connect（两次 click）模式稳定可靠——与真实鼠标行为等价。
+
 ### 2026-10-14 · v24：P2.5 落地——四种控制节点（human/switch/tool/notify）+ 回边下绕画法
 
 **动机**：用户实测画布后三项反馈——① 连线乱（回边与主链交叉）；② FAIL 标签盖住灰线分不清归属；③ 上轮分析的四个缺口节点（人工确认/智能路由/工具执行/通知）全部实现。

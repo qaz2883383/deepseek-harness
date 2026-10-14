@@ -608,11 +608,15 @@ function ScenarioFlowNode({ data }: NodeProps<Node<ScenarioNodeData>>): React.JS
   if (data.ghost !== undefined) {
     return (
       <div className={[css.scFlowNode, css.scFlowGhost, data.ghost === 'in' ? css.scFlowGhostIn : css.scFlowGhostOut].join(' ')}>
-        {data.ghost === 'out' ? <Handle type="target" position={Position.Left} isConnectable={false} /> : null}
+        {data.ghost === 'out'
+          ? <Handle type="target" position={Position.Left} />
+          : null}
         <span className={css.stageBadge}>{data.ghost === 'in' ? '入' : '出'}</span>
         <span className={css.stageTitle}>{data.title}</span>
         <span className={css.stageMeta}>{data.meta}</span>
-        {data.ghost === 'in' ? <Handle type="source" position={Position.Right} isConnectable={false} /> : null}
+        {data.ghost === 'in'
+          ? <Handle type="source" position={Position.Right} />
+          : null}
       </div>
     )
   }
@@ -833,20 +837,18 @@ function canvasNodes(stages: readonly StageRecord[], openId: string | undefined)
     {
       id: FLOW_IN_ID,
       position: { x: minX - 280, y: midY },
-      data: { kind: 'discipline', title: '用户输入 · 任务会话', meta: '轮次结束/空闲/显式触发', open: false, routes: [], ghost: 'in' },
+      data: { kind: 'discipline', title: '用户输入 · 任务会话', meta: '拖右侧端口到节点 = 设为流程起点', open: false, routes: [], ghost: 'in' },
       type: 'scenario',
       draggable: false,
-      selectable: false,
       deletable: false,
     },
     ...real,
     {
       id: FLOW_OUT_ID,
       position: { x: maxX + 280, y: midY },
-      data: { kind: 'persist', title: '流程出口 · 回注/落盘', meta: '无后续出边的阶段到此结束', open: false, routes: [], ghost: 'out' },
+      data: { kind: 'persist', title: '流程出口 · 回注/落盘', meta: '把节点连到左侧端口 = 设为流程终点', open: false, routes: [], ghost: 'out' },
       type: 'scenario',
       draggable: false,
-      selectable: false,
       deletable: false,
     },
   ]
@@ -987,7 +989,31 @@ function ScenarioCanvas({ stages, openId, layoutEpoch, onOpen, onStagesChange, t
     const source = connection.source
     const target = connection.target
     if (source === null || target === null || source === target) return
-    if (source.startsWith('__') || target.startsWith('__')) return
+    if (source === FLOW_IN_ID) {
+      // Entry → node: make the target a flow root (strip incoming references);
+      // the dashed entry edge then points at it automatically.
+      onStagesChange(stages.map(stage => {
+        const next = (stage.next ?? []).filter(id => id !== target)
+        if (stage.branch === undefined) return { ...stage, next }
+        const branch: { [route: string]: string[] } = {}
+        for (const [route, targets] of Object.entries(stage.branch)) {
+          const rest = targets.filter(id => id !== target)
+          if (rest.length > 0) branch[route] = [...rest]
+        }
+        return { ...stage, next, branch }
+      }))
+      return
+    }
+    if (target === FLOW_OUT_ID) {
+      // Node → exit: make the source a flow sink (strip outgoing edges).
+      onStagesChange(stages.map(item => {
+        if (item.id !== source) return item
+        const stripped: StageRecord = { ...item, next: [] }
+        delete (stripped as { branch?: unknown }).branch
+        return stripped
+      }))
+      return
+    }
     const stage = stages.find(item => item.id === source)
     if (stage === undefined) return
     const handle = connection.sourceHandle ?? 'out'
