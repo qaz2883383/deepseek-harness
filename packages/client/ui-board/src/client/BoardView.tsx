@@ -1161,7 +1161,7 @@ function TaskEditor({ task, onClose, onSaved, t }: { task: TaskRecord | undefine
           ...(deadline === undefined || deadline === '' ? {} : { deadline }),
         }))
       await postTasks(task === undefined
-        ? { op: 'create', title, purpose, category, plan: planPayload }
+        ? { op: 'create', title, purpose, category, plan: planPayload, ...(scenarioSel === '' ? {} : { scenario: scenarioSel }) }
         : { op: 'update', taskId: task.id, title, purpose, category, plan: planPayload, progress, scenario: scenarioSel === '' ? null : scenarioSel })
       onSaved()
     } finally {
@@ -1202,21 +1202,19 @@ function TaskEditor({ task, onClose, onSaved, t }: { task: TaskRecord | undefine
             </button>
           </div>
         </div>
-        {task === undefined ? null : (
-          <label className={css.prefsField}>
-            <span className={css.prefsFieldLabel}>{t('tab.scenarios')}</span>
-            <select
-              className={css.taskTitleInput}
-              value={scenarioSel}
-              onChange={(event) => { setScenarioSel(event.target.value) }}
-            >
-              <option value="">{t('sc.followCategory')}</option>
-              {scenarios.map(scenario => (
-                <option key={scenario.id} value={scenario.id}>{scenario.name}</option>
-              ))}
-            </select>
-          </label>
-        )}
+        <label className={css.prefsField}>
+          <span className={css.prefsFieldLabel}>{t('tab.scenarios')}</span>
+          <select
+            className={css.taskTitleInput}
+            value={scenarioSel}
+            onChange={(event) => { setScenarioSel(event.target.value) }}
+          >
+            <option value="">{t('sc.followCategory')}</option>
+            {scenarios.map(scenario => (
+              <option key={scenario.id} value={scenario.id}>{scenario.name}</option>
+            ))}
+          </select>
+        </label>
         <label className={css.prefsField}>
           <span className={css.prefsFieldLabel}>{t('task.purpose')}</span>
           <textarea

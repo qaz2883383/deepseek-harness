@@ -70,6 +70,10 @@ export interface ScenarioRecord {
   readonly roots?: readonly string[]
   /** Canvas-only: stage ids wired to the exit node (persistent exit edges). */
   readonly exits?: readonly string[]
+  /** Canvas-only: explicit entry-node position (flow coordinates). */
+  readonly entryPosition?: { readonly x: number; readonly y: number }
+  /** Canvas-only: explicit exit-node position (flow coordinates). */
+  readonly exitPosition?: { readonly x: number; readonly y: number }
   readonly instructions: { readonly clarify: string; readonly loop: string; readonly verify: string }
   readonly outputs: { readonly template: string; readonly persistDirectory: string }
   readonly memory?: { readonly profileFile?: string }
@@ -215,22 +219,30 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
   const [stages, setStages] = useState<readonly StageRecord[]>(() => effectiveStages(scenario))
   const [roots, setRoots] = useState<readonly string[]>(() => [...(scenario.roots ?? [])])
   const [exits, setExits] = useState<readonly string[]>(() => [...(scenario.exits ?? [])])
+  const [entryPos, setEntryPos] = useState<{ x: number; y: number } | undefined>(
+    () => scenario.entryPosition === undefined ? undefined : { ...scenario.entryPosition })
+  const [exitPos, setExitPos] = useState<{ x: number; y: number } | undefined>(
+    () => scenario.exitPosition === undefined ? undefined : { ...scenario.exitPosition })
   const [baseline] = useState(() => JSON.stringify({
     stages: effectiveStages(scenario),
     roots: scenario.roots ?? [],
     exits: scenario.exits ?? [],
+    entryPosition: scenario.entryPosition ?? null,
+    exitPosition: scenario.exitPosition ?? null,
   }))
   const [openId, setOpenId] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
   const [layoutEpoch, setLayoutEpoch] = useState(0)
-  const dirty = JSON.stringify({ stages, roots, exits }) !== baseline
+  const dirty = JSON.stringify({ stages, roots, exits, entryPosition: entryPos ?? null, exitPosition: exitPos ?? null }) !== baseline
 
   const save = async (): Promise<void> => {
     setSaving(true)
     try {
       await postScenarios({
         op: 'save',
-        scenario: { ...scenario, stages, roots: [...roots], exits: [...exits] },
+        // `entryPosition: undefined` drops the key in the JSON body, which
+        // clears a previously persisted position on the host side.
+        scenario: { ...scenario, stages, roots: [...roots], exits: [...exits], entryPosition: entryPos, exitPosition: exitPos },
       })
       onChanged()
     } finally {
@@ -270,6 +282,8 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
                   setStages(effectiveStages(scenario))
                   setRoots([...(scenario.roots ?? [])])
                   setExits([...(scenario.exits ?? [])])
+                  setEntryPos(scenario.entryPosition === undefined ? undefined : { ...scenario.entryPosition })
+                  setExitPos(scenario.exitPosition === undefined ? undefined : { ...scenario.exitPosition })
                   setOpenId(undefined)
                 }}
               >
@@ -327,6 +341,10 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
           className={css.scCanvasAdd}
           onClick={() => {
             setStages(layoutStages(stages))
+            // Auto-arrange is a full re-layout: boundary ghosts snap back to
+            // their derived side positions.
+            setEntryPos(undefined)
+            setExitPos(undefined)
             setLayoutEpoch(epoch => epoch + 1)
           }}
         >
@@ -337,12 +355,18 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
         stages={stages}
         roots={roots}
         exits={exits}
+        entryPosition={entryPos}
+        exitPosition={exitPos}
         openId={openId}
         layoutEpoch={layoutEpoch}
         onOpen={(id) => { setOpenId(id === openId ? undefined : id) }}
         onStagesChange={setStages}
         onRootsChange={setRoots}
         onExitsChange={setExits}
+        onBoundaryChange={(which, position) => {
+          if (which === 'in') setEntryPos(position)
+          else setExitPos(position)
+        }}
         t={t}
       />
       {open === undefined ? null : (
@@ -821,10 +845,18 @@ function layoutStages(stages: readonly StageRecord[]): readonly StageRecord[] {
  * scenario roots/exits). */
 const FLOW_IN_ID = '__flow_in'
 const FLOW_OUT_ID = '__flow_out'
+/** Reserved branch target: the flow exit (mirrors the host engine constant). */
+const EXIT_TARGET = '__exit'
 
 /** Canvas rows derived from stage records, wrapped by an entry and an exit
- * ghost so the user can see where input enters and output leaves. */
-function canvasNodes(stages: readonly StageRecord[], openId: string | undefined): Node<ScenarioNodeData>[] {
+ * ghost so the user can see where input enters and output leaves. The ghost
+ * positions are user-draggable and persist via entryPosition/exitPosition. */
+function canvasNodes(
+  stages: readonly StageRecord[],
+  openId: string | undefined,
+  entryPosition: { x: number; y: number } | undefined,
+  exitPosition: { x: number; y: number } | undefined,
+): Node<ScenarioNodeData>[] {
   const real: Node<ScenarioNodeData>[] = stages.map((stage, index) => ({
     id: stage.id,
     position: stage.position ?? { x: 40, y: 40 + index * 110 },
@@ -857,19 +889,17 @@ function canvasNodes(stages: readonly StageRecord[], openId: string | undefined)
   return [
     {
       id: FLOW_IN_ID,
-      position: { x: minX - 280, y: midY },
+      position: entryPosition ?? { x: minX - 280, y: midY },
       data: { kind: 'discipline', title: '用户输入 · 任务会话', meta: '轮次结束/空闲/显式触发 · 连线即入口边', open: false, routes: [], ghost: 'in' },
       type: 'scenario',
-      draggable: false,
       deletable: false,
     },
     ...real,
     {
       id: FLOW_OUT_ID,
-      position: { x: maxX + 280, y: midY },
-      data: { kind: 'persist', title: '流程出口 · 回注/落盘', meta: '连线即出口边 · 删除连线可撤销', open: false, routes: [], ghost: 'out' },
+      position: exitPosition ?? { x: maxX + 280, y: midY },
+      data: { kind: 'persist', title: '流程出口 · 回注/落盘', meta: '连线即出口边 · 分支（PASS/FAIL/路由）连入=该分支直接结束', open: false, routes: [], ghost: 'out' },
       type: 'scenario',
-      draggable: false,
       deletable: false,
     },
   ]
@@ -904,6 +934,20 @@ function canvasEdges(stages: readonly StageRecord[], roots: readonly string[], e
     })
   }
   for (const stage of stages) {
+    // Branch edges: a `__exit` target renders into the exit node — the flow
+    // ends on that branch instead of routing to another stage.
+    const pushBranchEdge = (route: string, target: string, label: string, color: string): void => {
+      edges.push({
+        id: `e:${stage.id}:${route}:${target}`,
+        source: stage.id,
+        target: target === EXIT_TARGET ? FLOW_OUT_ID : target,
+        sourceHandle: route,
+        type: 'scenario',
+        label,
+        markerEnd: { type: MarkerType.ArrowClosed, color },
+        style: { stroke: color, strokeWidth: 1.8 },
+      })
+    }
     for (const target of stage.next ?? []) {
       edges.push({
         id: `e:${stage.id}:out:${target}`,
@@ -914,45 +958,12 @@ function canvasEdges(stages: readonly StageRecord[], roots: readonly string[], e
         markerEnd: { type: MarkerType.ArrowClosed },
       })
     }
-    for (const target of stage.branch?.pass ?? []) {
-      edges.push({
-        id: `e:${stage.id}:pass:${target}`,
-        source: stage.id,
-        target,
-        sourceHandle: 'pass',
-        type: 'scenario',
-        label: 'PASS',
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#16a34a' },
-        style: { stroke: '#16a34a', strokeWidth: 1.8 },
-      })
-    }
-    for (const target of stage.branch?.fail ?? []) {
-      edges.push({
-        id: `e:${stage.id}:fail:${target}`,
-        source: stage.id,
-        target,
-        sourceHandle: 'fail',
-        type: 'scenario',
-        label: 'FAIL',
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#dc2626' },
-        style: { stroke: '#dc2626', strokeWidth: 1.8 },
-      })
-    }
+    for (const target of stage.branch?.pass ?? []) pushBranchEdge('pass', target, 'PASS', '#16a34a')
+    for (const target of stage.branch?.fail ?? []) pushBranchEdge('fail', target, 'FAIL', '#dc2626')
     if (stage.kind === 'switch') {
       for (const [route, targets] of Object.entries(stage.branch ?? {})) {
         if (route === 'pass' || route === 'fail') continue
-        for (const target of targets) {
-          edges.push({
-            id: `e:${stage.id}:${route}:${target}`,
-            source: stage.id,
-            target,
-            sourceHandle: route,
-            type: 'scenario',
-            label: route,
-            markerEnd: { type: MarkerType.ArrowClosed, color: '#8b5cf6' },
-            style: { stroke: '#8b5cf6', strokeWidth: 1.8 },
-          })
-        }
+        for (const target of targets) pushBranchEdge(route, target, route, '#8b5cf6')
       }
     }
   }
@@ -962,29 +973,39 @@ function canvasEdges(stages: readonly StageRecord[], roots: readonly string[], e
 /**
  * The DAG canvas: nodes drag (position persists), connecting two ports creates
  * the edge in the stage records, deleting removes it, clicking opens the
- * editor. All mutations flow back through `onStagesChange`.
+ * editor. All mutations flow back through `onStagesChange` /
+ * `onBoundaryChange`.
  */
-function ScenarioCanvas({ stages, roots, exits, openId, layoutEpoch, onOpen, onStagesChange, onRootsChange, onExitsChange, t }: {
+function ScenarioCanvas({ stages, roots, exits, entryPosition, exitPosition, openId, layoutEpoch, onOpen, onStagesChange, onRootsChange, onExitsChange, onBoundaryChange, t }: {
   stages: readonly StageRecord[]
   roots: readonly string[]
   exits: readonly string[]
+  entryPosition: { x: number; y: number } | undefined
+  exitPosition: { x: number; y: number } | undefined
   openId: string | undefined
   layoutEpoch: number
   onOpen: (id: string) => void
   onStagesChange: (next: readonly StageRecord[]) => void
   onRootsChange: (next: readonly string[]) => void
   onExitsChange: (next: readonly string[]) => void
+  /** Ghost-node position commits: `'in'` / `'out'` plus the dragged point. */
+  onBoundaryChange: (which: 'in' | 'out', position: { x: number; y: number }) => void
   t: ScenariosT
 }): React.JSX.Element {
-  const [nodes, setNodes, onNodesChange] = useNodesState(canvasNodes(stages, openId))
+  const [nodes, setNodes, onNodesChange] = useNodesState(canvasNodes(stages, openId, entryPosition, exitPosition))
   const [edges, setEdges, onEdgesChange] = useEdgesState(canvasEdges(stages, roots, exits))
 
   // External stage edits (property panel, toolbar add) resync the canvas.
   // Selection must survive the rebuild: pressing Delete removes exactly the
   // selected nodes/edges, and React Flow reads `selected` off these objects.
   useEffect(() => {
-    setNodes(current => canvasNodes(stages, openId).map(node => {
-      if (node.id === FLOW_IN_ID || node.id === FLOW_OUT_ID) return node
+    setNodes(current => canvasNodes(stages, openId, entryPosition, exitPosition).map(node => {
+      if (node.id === FLOW_IN_ID || node.id === FLOW_OUT_ID) {
+        // Ghosts take the position from state (drag commits land there);
+        // only the selection flag survives from the live node.
+        const existing = current.find(item => item.id === node.id)
+        return existing === undefined ? node : { ...node, ...(existing.selected === true ? { selected: true } : {}) }
+      }
       const existing = current.find(item => item.id === node.id)
       if (existing === undefined) return node
       const stagePosition = stages.find(stage => stage.id === node.id)?.position
@@ -994,7 +1015,7 @@ function ScenarioCanvas({ stages, roots, exits, openId, layoutEpoch, onOpen, onS
       const existing = current.find(item => item.id === edge.id)
       return existing === undefined ? edge : { ...edge, ...(existing.selected === true ? { selected: true } : {}) }
     }))
-  }, [stages, roots, exits, openId, setNodes, setEdges])
+  }, [stages, roots, exits, entryPosition, exitPosition, openId, setNodes, setEdges])
 
   const commitPositions = (updated: readonly Node[]): void => {
     onStagesChange(stages.map(stage => {
@@ -1016,7 +1037,19 @@ function ScenarioCanvas({ stages, roots, exits, openId, layoutEpoch, onOpen, onS
       return
     }
     if (target === FLOW_OUT_ID) {
-      // Node → exit: a persistent exit edge (scenario exits).
+      const sourceHandle = connection.sourceHandle ?? 'out'
+      if (sourceHandle !== 'out') {
+        // A branch (gate pass/fail, switch route) wired to the exit: that
+        // branch ends the flow instead of routing to another stage.
+        const stage = stages.find(item => item.id === source)
+        if (stage === undefined) return
+        const current = stage.branch?.[sourceHandle] ?? []
+        if (current.includes(EXIT_TARGET)) return
+        const branch = { ...(stage.branch ?? {}), [sourceHandle]: [...current, EXIT_TARGET] }
+        onStagesChange(stages.map(item => item.id === source ? { ...item, branch } : item))
+        return
+      }
+      // Node → exit via the plain output port: a persistent exit edge.
       if (exits.includes(source)) return
       onExitsChange([...exits, source])
       return
@@ -1037,7 +1070,8 @@ function ScenarioCanvas({ stages, roots, exits, openId, layoutEpoch, onOpen, onS
   }
 
   /** Edge ids we generate: `e:<source>:<handle>:<target>`; boundary edges use
-   * the `__flow_*` node ids and map to scenario roots/exits. */
+   * the `__flow_*` node ids and map to scenario roots/exits, branch-exit
+   * edges carry the `__exit` reserved target. */
   const onEdgesDelete = (deleted: readonly Edge[]): void => {
     let next = [...stages]
     let nextRoots = [...roots]
@@ -1054,6 +1088,20 @@ function ScenarioCanvas({ stages, roots, exits, openId, layoutEpoch, onOpen, onS
       }
       if (target === FLOW_OUT_ID) {
         nextExits = nextExits.filter(id => id !== source)
+        continue
+      }
+      if (target === EXIT_TARGET) {
+        next = next.map(stage => {
+          if (stage.id !== source) return stage
+          const list: readonly string[] = stage.branch?.[handle] ?? []
+          const rest = list.filter(id => id !== EXIT_TARGET)
+          if (rest.length === list.length) return stage
+          const branch: { [route: string]: string[] } = {}
+          for (const [route, targets] of Object.entries(stage.branch ?? {})) branch[route] = [...targets]
+          if (rest.length === 0) delete branch[handle]
+          else branch[handle] = [...rest]
+          return { ...stage, branch }
+        })
         continue
       }
       if (source.startsWith('__') || target.startsWith('__')) continue
@@ -1116,7 +1164,13 @@ function ScenarioCanvas({ stages, roots, exits, openId, layoutEpoch, onOpen, onS
         onEdgesDelete={onEdgesDelete}
         onNodesDelete={onNodesDelete}
         onEdgeDoubleClick={(_event, edge) => { onEdgesDelete([edge]) }}
-        onNodeDragStop={(_event, node) => { commitPositions([node]) }}
+        onNodeDragStop={(_event, node) => {
+          if (node.id === FLOW_IN_ID || node.id === FLOW_OUT_ID) {
+            onBoundaryChange(node.id === FLOW_IN_ID ? 'in' : 'out', { x: Math.round(node.position.x), y: Math.round(node.position.y) })
+            return
+          }
+          commitPositions([node])
+        }}
         onNodeClick={(_event, node) => { if (!node.id.startsWith('__')) onOpen(node.id) }}
         connectionRadius={40}
         onConnectEnd={(event, state) => {

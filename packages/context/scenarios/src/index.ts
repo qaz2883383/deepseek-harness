@@ -109,6 +109,10 @@ export interface ScenarioRecord {
   readonly roots?: readonly string[]
   /** Canvas-only: stage ids wired to the exit node (persistent exit edges). */
   readonly exits?: readonly string[]
+  /** Canvas-only: explicit entry-node position (flow coordinates). */
+  readonly entryPosition?: { readonly x: number; readonly y: number }
+  /** Canvas-only: explicit exit-node position (flow coordinates). */
+  readonly exitPosition?: { readonly x: number; readonly y: number }
   readonly instructions: ScenarioInstructions
   readonly outputs: { readonly template: string; readonly persistDirectory: string }
   readonly memory?: { readonly profileFile?: string }
@@ -219,6 +223,14 @@ function toStage(value: unknown): StageRecord | undefined {
   return stage
 }
 
+/** Canvas position field: both coordinates must be numbers. */
+function toPosition(value: unknown): { x: number; y: number } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const raw = value as Record<string, unknown>
+  if (typeof raw.x !== 'number' || typeof raw.y !== 'number') return undefined
+  return { x: raw.x, y: raw.y }
+}
+
 function toScenario(value: unknown): ScenarioRecord | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const raw = value as Record<string, unknown>
@@ -232,6 +244,8 @@ function toScenario(value: unknown): ScenarioRecord | undefined {
   if (typeof outputs !== 'object' || outputs === null) return undefined
   const out = outputs as Record<string, unknown>
   if (typeof out.template !== 'string' || typeof out.persistDirectory !== 'string') return undefined
+  const entry = toPosition(raw.entryPosition)
+  const exit = toPosition(raw.exitPosition)
   return {
     id: raw.id,
     name: raw.name,
@@ -240,6 +254,8 @@ function toScenario(value: unknown): ScenarioRecord | undefined {
     ...(Array.isArray(raw.stages) ? { stages: raw.stages.map(toStage).filter((s): s is StageRecord => s !== undefined) } : {}),
     ...(Array.isArray(raw.roots) ? { roots: raw.roots.filter((v): v is string => typeof v === 'string') } : {}),
     ...(Array.isArray(raw.exits) ? { exits: raw.exits.filter((v): v is string => typeof v === 'string') } : {}),
+    ...(entry === undefined ? {} : { entryPosition: entry }),
+    ...(exit === undefined ? {} : { exitPosition: exit }),
     instructions: { clarify: ins.clarify, loop: ins.loop, verify: ins.verify },
     outputs: { template: out.template, persistDirectory: out.persistDirectory },
     ...(typeof (raw.memory as { profileFile?: unknown } | undefined)?.profileFile === 'string'
@@ -686,6 +702,13 @@ function notice(ctx: FireCtx, text: string, summary: string): void {
  * an entry notice and pass through. Edge bookkeeping makes re-propagation
  * idempotent, which also guards cycles.
  */
+/**
+ * Reserved branch target: the flow exit. A branch edge drawn into the canvas
+ * exit node stores this id; firing it finds no stage, so the flow simply ends
+ * (the fail notice states the output is returned directly).
+ */
+const EXIT_TARGET = '__exit'
+
 function fireTargets(ctx: FireCtx, stage: StageRecord, route: string): void {
   const stages = effectiveStages(ctx.scenario)
   const ids = route === 'pass'
@@ -981,7 +1004,9 @@ async function runReviewer(ctx: FireCtx, gate: StageRecord): Promise<void> {
     parent.followup(createUserMessage({
       content: [{
         type: 'text',
-        text: `[场景编排 · ${gate.title}] 审核未过（第 ${String(count)}/${String(maxRework)} 次），按编排转入后续处理。审核意见：\n\n${opinion}`,
+        text: (gate.branch?.fail ?? []).includes(EXIT_TARGET)
+          ? `[场景编排 · ${gate.title}] 审核未过（第 ${String(count)}/${String(maxRework)} 次），fail 边连到流程出口：流程就此结束，未过审的产出与审核意见已直接返回。\n\n${opinion}`
+          : `[场景编排 · ${gate.title}] 审核未过（第 ${String(count)}/${String(maxRework)} 次），按编排转入后续处理。审核意见：\n\n${opinion}`,
       }],
       source: { kind: 'scenario-hook', form: 'notice', summary: `${scenario.name}/${gate.title} FAIL-ROUTE` },
     }))

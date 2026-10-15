@@ -659,10 +659,14 @@ function serveTasksApi(scope: Context, dir: string): void {
           typeof id === 'string' ? tasks.find(task => task.id === id) : undefined
         try {
           if (payload.op === 'create' && typeof payload.title === 'string' && payload.title.trim() !== '') {
-            const record = emptyRecord(payload.title.trim().slice(0, 120),
-              typeof payload.purpose === 'string' ? payload.purpose : '',
-              normalizePlan(payload.plan),
-              payload.category === 'learning' ? 'learning' : 'work')
+            const record: TaskRecord = {
+              ...emptyRecord(payload.title.trim().slice(0, 120),
+                typeof payload.purpose === 'string' ? payload.purpose : '',
+                normalizePlan(payload.plan),
+                payload.category === 'learning' ? 'learning' : 'work'),
+              // Explicit scenario at creation; absent keeps the category default.
+              ...(typeof payload.scenario === 'string' && payload.scenario !== '' ? { scenario: payload.scenario } : {}),
+            }
             tasks.unshift(record)
             // The folder exists the moment the record does: the anchor chain
             // always resolves to a workspace root.

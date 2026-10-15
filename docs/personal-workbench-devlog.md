@@ -512,6 +512,16 @@ packages/client/ui-board/
 
 **v27.1 补丁（用户反馈"连线后马上消失"）**：真实用户拖拽落点常在**节点身体**而非精确端口（默认容差仅 20px，超差即取消——拖出的预览线落下即消失，正是"马上消失"的现象）。三层加固：① `connectionRadius={40}`（端口容差翻倍）；② **onConnectEnd 兜底**——拖到节点 body 上松手也识别 set-root/set-sink 手势（`elementFromPoint(clientX/Y)` 定位落点节点，只对边界节点语义生效；注意合成事件 `event.target` 是 document 不可靠，必须用坐标反查）；③ ghost 端口视觉放大（12px + 2px 边框）更易命中。CDP 端 handle→handle 主路径已实测 dirty=true（180 轮分轮 drag），body fallback 因 CDP 嵌套滚动坐标失真未能自动化复现，留待用户实测确认。
 
+### 2026-10-15 · v29：用户三反馈——出入口可拖 / 任务选场景 / 分支直连出口（fail 直接返回）
+
+**反馈 1：出入口节点不可拖，图乱**。`ScenarioRecord` 新增 `entryPosition`/`exitPosition`（canvas-only，同 roots/exits 模式）；ghost 节点改 `draggable`（保留不可删），`onNodeDragStop` 按 `__flow_*` id 分流到 `onBoundaryChange` → 草稿态 → 保存落盘（undefined 时 JSON 序列化自动丢键=清除）；resync 时 ghost 取 state 位置（只保留 selected），放弃回滚、自动排列重置为推导位。验证：JSON 预设 (-260,20) → 节点 transform 精确匹配；`draggable` class 出现。
+
+**反馈 2：新建 task 无法选场景**。引擎本就支持 `task.scenario` 覆盖（`scenarioIdForTask`：有值用之，否则按 category 回退 learning/work），缺口纯在 UI/API：TaskEditor 的场景下拉被 `task === undefined ? null` 藏住、create op 不收该字段。修复：新建表单常显下拉（默认"跟随任务类别"），host create 接受 `scenario` 非空字符串。验证：新建选 test 场景 → tasks.json `scenario: "sc-mv88suvv"` ✓（验证后已删测试任务）。
+
+**反馈 3：审核节点 fail 想直接输出返回，连不到出口——分析结论：不冲突，反而填补设计缺口**。引擎侧 `branch.fail` 为空=原地打回、非空=fire 目标（未知 id 静默跳过），"fail 后直接结束流程"此前无处表达（只能靠打回上限耗尽放行，语义完全不同）。方案：**保留目标 `'__exit'`**——画布上从 gate 的 FAIL（或 PASS、switch 路由）handle 拖到出口节点 = `branch[handle] += '__exit'`；canvasEdges 把 `__exit` 目标渲染成指向出口节点的分支色实线（红 FAIL/绿 PASS/紫路由）；引擎 `fireTargets` 找不到该 id 自然跳过=流程终止，`runReviewer` 的 fail 通知区分两种文案（连出口="流程就此结束，产出与意见直接返回"）。**顺带破案用户上轮"无法连接到出口"的真相**：v28 把 gate 的任何出口连接记成无 handle 的 `exits` 条目，而 gate 没有 `out` handle → 边永远渲染不出来（用户数据里的 `exits:["review"]` 幻影已清理，正确表达是 `fail:["__exit"]`）。验证：JSON 预置 `fail:["__exit"]` → 红边渲染 → 双击删除 → dirty → 刷新放弃回滚 → 边回来 ✓。
+
+**exactOptional 坑**：`...(cond ? {} : { x: f() })` 里两次调用 `f()` 无法窄化（第二次仍是 `T | undefined`）——先存局部变量再条件展开。
+
 ### 2026-10-15 · v28：入口/出口实线化——roots/exits 持久化（用户证伪 v27.1 归因，重构边界连线语义）
 
 **用户证伪**：v27.1 的"落点没精确命中端口"结论不对——**线已经吸附出现**（吸附成功=命中了端口），松手确认时才消失；且出口节点挂着一堆自动虚线不合理、虚线也永远拉不成实线。真正根因：v27 把边界连线实现成**元操作**（连入口=清除目标入边、虚线自动重指），用户拖出的线从未成为一条真实、持久的边——不是指针精度问题，是语义设计错误。教训：**"吸附出现+松手消失"= onConnect 触发了但结果被丢弃，先审视自己的数据流，再怀疑输入精度**。
