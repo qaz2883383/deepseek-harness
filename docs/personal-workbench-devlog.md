@@ -512,6 +512,21 @@ packages/client/ui-board/
 
 **v27.1 补丁（用户反馈"连线后马上消失"）**：真实用户拖拽落点常在**节点身体**而非精确端口（默认容差仅 20px，超差即取消——拖出的预览线落下即消失，正是"马上消失"的现象）。三层加固：① `connectionRadius={40}`（端口容差翻倍）；② **onConnectEnd 兜底**——拖到节点 body 上松手也识别 set-root/set-sink 手势（`elementFromPoint(clientX/Y)` 定位落点节点，只对边界节点语义生效；注意合成事件 `event.target` 是 document 不可靠，必须用坐标反查）；③ ghost 端口视觉放大（12px + 2px 边框）更易命中。CDP 端 handle→handle 主路径已实测 dirty=true（180 轮分轮 drag），body fallback 因 CDP 嵌套滚动坐标失真未能自动化复现，留待用户实测确认。
 
+### 2026-10-15 · v28：入口/出口实线化——roots/exits 持久化（用户证伪 v27.1 归因，重构边界连线语义）
+
+**用户证伪**：v27.1 的"落点没精确命中端口"结论不对——**线已经吸附出现**（吸附成功=命中了端口），松手确认时才消失；且出口节点挂着一堆自动虚线不合理、虚线也永远拉不成实线。真正根因：v27 把边界连线实现成**元操作**（连入口=清除目标入边、虚线自动重指），用户拖出的线从未成为一条真实、持久的边——不是指针精度问题，是语义设计错误。教训：**"吸附出现+松手消失"= onConnect 触发了但结果被丢弃，先审视自己的数据流，再怀疑输入精度**。
+
+**重构**（host `packages/context/scenarios` + client `ui-board`）：
+- `ScenarioRecord` 新增 `roots`/`exits`（string[]，canvas-only，引擎不消费，save handler 透传落盘）；种子 learning/work 补 `roots:['clarify'], exits:['persist']`
+- 连线语义改为**纯加边**：入口→节点 = `roots` 追加；节点→出口 = `exits` 追加；不再清除任何 next/branch
+- **自动虚线全部删除**（canvasEdges 只画 roots/exits 实线 + 真实 next/branch 边）；双击删边按 `__flow_*` id 前缀分流到 roots/exits 过滤；删节点清边界引用；草稿态 roots/exits 纳入 dirty 基线与放弃回滚
+- **渲染坑**：ghost-in 的 source Handle 无 id（React Flow 默认 null），入口边写 `sourceHandle:'out'` 会导致 handle 查找失败、边不渲染（出口边能渲染正因 targetHandle 留空走了回退）——入口边同样去掉 sourceHandle
+- 文案更新：ghost meta + 画布 aria-label 改为实线引导（原文案"虚线为流程入口/出口"已过时）
+
+**验证**（3081 浏览器实测）：JSON 种子 → 入口/出口实线渲染 ✓、全画布零虚线 ✓；双击删入口边 → 边消失+未保存标记 ✓；双击删出口边 ✓；保存 → JSON `roots:[]/exits:[]` ✓；重载 → 持久 ✓。拖拽**新增**边界边未自动化（本轮浏览器工具限制：handle 无 a11y ref、click offset 不生效、drag 仅支持 HTML5 draggable），与删除共用同一 state→resync→渲染管线，留待用户拖拽实测。
+
+**构建坑**：此环境 `pnpm run build:lib:host` 报 `'tsdown' is not recognized`（PATH 无 bin）——改用 `node .\node_modules\tsdown\dist\run.mjs --config-loader native --env.DSH_BUILD_FACE host|client` 直调；单包重编用 cwd 切包目录后同命令（`pnpm --filter <pkg> run bundle` 同样卡 tsdown PATH）。
+
 ### 2026-10-14 · v24：P2.5 落地——四种控制节点（human/switch/tool/notify）+ 回边下绕画法
 
 **动机**：用户实测画布后三项反馈——① 连线乱（回边与主链交叉）；② FAIL 标签盖住灰线分不清归属；③ 上轮分析的四个缺口节点（人工确认/智能路由/工具执行/通知）全部实现。

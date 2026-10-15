@@ -105,6 +105,10 @@ export interface ScenarioRecord {
   readonly builtin?: boolean
   /** P2.1 ordered pipeline; absent records synthesize it from the flat fields. */
   readonly stages?: readonly StageRecord[]
+  /** Canvas-only: stage ids wired to the entry node (persistent entry edges). */
+  readonly roots?: readonly string[]
+  /** Canvas-only: stage ids wired to the exit node (persistent exit edges). */
+  readonly exits?: readonly string[]
   readonly instructions: ScenarioInstructions
   readonly outputs: { readonly template: string; readonly persistDirectory: string }
   readonly memory?: { readonly profileFile?: string }
@@ -234,6 +238,8 @@ function toScenario(value: unknown): ScenarioRecord | undefined {
     description: raw.description,
     ...(raw.builtin === true ? { builtin: true } : {}),
     ...(Array.isArray(raw.stages) ? { stages: raw.stages.map(toStage).filter((s): s is StageRecord => s !== undefined) } : {}),
+    ...(Array.isArray(raw.roots) ? { roots: raw.roots.filter((v): v is string => typeof v === 'string') } : {}),
+    ...(Array.isArray(raw.exits) ? { exits: raw.exits.filter((v): v is string => typeof v === 'string') } : {}),
     instructions: { clarify: ins.clarify, loop: ins.loop, verify: ins.verify },
     outputs: { template: out.template, persistDirectory: out.persistDirectory },
     ...(typeof (raw.memory as { profileFile?: unknown } | undefined)?.profileFile === 'string'
@@ -1062,6 +1068,8 @@ function learningScenario(now: number): ScenarioRecord {
     name: '深度学习研究',
     description: '从基础命题出发的系统性学习：先澄清，再由调研 agent 全面检索，最后梳理成读者自适应的笔记并沉淀知识画像。',
     builtin: true,
+    roots: ['clarify'],
+    exits: ['persist'],
     stages: [
       { id: 'clarify', kind: 'discipline', title: '前置澄清', next: ['scout'], position: { x: 40, y: 170 }, text: [
         '拿到学习命题后先判断是否存在关键性信息缺口（目标深度、读者基础、范围边界）。',
@@ -1109,6 +1117,8 @@ function workScenario(now: number): ScenarioRecord {
     name: '工作交付',
     description: '目标明确的工作执行：开工前集中澄清，一次性做完并验证正确，产物落盘到任务目录。',
     builtin: true,
+    roots: ['clarify'],
+    exits: ['persist'],
     stages: [
       { id: 'clarify', kind: 'discipline', title: '前置澄清', next: ['loop'], position: { x: 40, y: 160 }, text: [
         '拿到任务先快速分析；若需求存在不清晰或可能影响交付的地方，在开工前第一时间集中提问确认。',
