@@ -680,7 +680,10 @@ export function BoardView({
           </button>
         </div>
         {tab === 'scenarios'
-          ? <BoardScenariosPanel t={t} />
+          ? <BoardScenariosPanel
+            t={t}
+            sessionLabel={(sessionId) => tasks.find(task => task.sessions.includes(sessionId))?.title}
+          />
           : tab === 'calendar'
           ? <CalendarPanel
             events={events}

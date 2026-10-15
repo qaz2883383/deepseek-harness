@@ -125,6 +125,25 @@ async function fetchScenarios(): Promise<readonly ScenarioRecord[] | undefined> 
 
 export { fetchScenarios }
 
+/** Per-session runtime bookkeeping mirrored from the host stage engine. */
+export interface ScenarioRuntimeState {
+  readonly scenarioId: string
+  readonly turns: number
+  readonly hookRuns: Readonly<Record<string, number>>
+  readonly rework: Readonly<Record<string, number>>
+  /** Fired-edge keys, `source>target`; `__exit` marks a branch-to-exit fire. */
+  readonly edges: Readonly<Record<string, boolean>>
+}
+
+async function fetchScenarioStates(): Promise<Readonly<Record<string, ScenarioRuntimeState>> | undefined> {
+  const token = routeToken('dsh-scenarios')
+  if (token === undefined) return undefined
+  const response = await fetch(`/scenarios?token=${encodeURIComponent(token)}&states=1`)
+  if (!response.ok) return undefined
+  const payload = await response.json() as { states?: Record<string, ScenarioRuntimeState> }
+  return payload.states
+}
+
 async function postScenarios(body: Record<string, unknown>): Promise<Record<string, unknown> | undefined> {
   const token = routeToken('dsh-scenarios')
   if (token === undefined) return undefined
@@ -149,7 +168,11 @@ const KIND_LABEL: Record<StageRecord['kind'], string> = {
 }
 
 /** The scenario management panel: toolbar, list, pipeline detail, and editing. */
-export function BoardScenariosPanel({ t }: { t: ScenariosT }): React.JSX.Element {
+export function BoardScenariosPanel({ sessionLabel, t }: {
+  /** Resolves a board session id to its task title for the runtime picker. */
+  sessionLabel: (sessionId: string) => string | undefined
+  t: ScenariosT
+}): React.JSX.Element {
   const [scenarios, setScenarios] = useState<readonly ScenarioRecord[]>([])
   const [ready, setReady] = useState(false)
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
@@ -202,7 +225,7 @@ export function BoardScenariosPanel({ t }: { t: ScenariosT }): React.JSX.Element
             ))}
           </div>}
       {selected === undefined ? null : (
-        <ScenarioPipeline key={selected.updatedAt} scenario={selected} onChanged={() => { void refresh() }} onEdit={() => { setEditing(selected) }} t={t} />
+        <ScenarioPipeline key={selected.updatedAt} scenario={selected} onChanged={() => { void refresh() }} onEdit={() => { setEditing(selected) }} sessionLabel={sessionLabel} t={t} />
       )}
     </div>
   )
@@ -210,10 +233,12 @@ export function BoardScenariosPanel({ t }: { t: ScenariosT }): React.JSX.Element
 
 /** The graph-as-editor pipeline: vertical stage flow with per-node editing.
  * Edits stay in a local draft until the user presses save. */
-function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
+function ScenarioPipeline({ scenario, onChanged, onEdit, sessionLabel, t }: {
   scenario: ScenarioRecord
   onChanged: () => void
   onEdit: () => void
+  /** Resolves a board session id to its task title for the runtime picker. */
+  sessionLabel: (sessionId: string) => string | undefined
   t: ScenariosT
 }): React.JSX.Element {
   const [stages, setStages] = useState<readonly StageRecord[]>(() => effectiveStages(scenario))
@@ -233,7 +258,14 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
   const [openId, setOpenId] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
   const [layoutEpoch, setLayoutEpoch] = useState(0)
+  // Runtime overlay: engine bookkeeping for one picked session.
+  const [runtimeOn, setRuntimeOn] = useState(false)
+  const [runtimeStates, setRuntimeStates] = useState<Readonly<Record<string, ScenarioRuntimeState>> | undefined>(undefined)
+  const [runtimeSession, setRuntimeSession] = useState('')
   const dirty = JSON.stringify({ stages, roots, exits, entryPosition: entryPos ?? null, exitPosition: exitPos ?? null }) !== baseline
+  const runtimeSessions = Object.entries(runtimeStates ?? {})
+    .filter(([, state]) => state.scenarioId === scenario.id)
+  const activeRuntime = runtimeOn && runtimeSession !== '' ? runtimeStates?.[runtimeSession] : undefined
 
   const save = async (): Promise<void> => {
     setSaving(true)
@@ -350,13 +382,55 @@ function ScenarioPipeline({ scenario, onChanged, onEdit, t }: {
         >
           ⟳ {t('sc.canvas.layout')}
         </button>
+        <button
+          type="button"
+          className={css.scCanvasAdd}
+          onClick={() => {
+            const next = !runtimeOn
+            setRuntimeOn(next)
+            setRuntimeSession('')
+            if (next) void (async () => { setRuntimeStates(await fetchScenarioStates()) })()
+          }}
+        >
+          {runtimeOn ? `■ ${t('sc.runtime.off')}` : `▶ ${t('sc.runtime.on')}`}
+        </button>
       </div>
+      {runtimeOn ? (
+        <div className={css.scRuntimeBar}>
+          <select
+            className={css.scRuntimeSelect}
+            value={runtimeSession}
+            onChange={(event) => { setRuntimeSession(event.target.value) }}
+          >
+            <option value="">{t('sc.runtime.pick')}</option>
+            {runtimeSessions.map(([sessionId, state]) => {
+              const title = sessionLabel(sessionId)
+              const label = title === undefined
+                ? sessionId.slice(0, 16)
+                : `${title} (${sessionId.replace(/^task-/, '').slice(0, 8)})`
+              return (
+                <option key={sessionId} value={sessionId}>
+                  {`${label} · ${t('sc.runtime.turns').replace('{turns}', String(state.turns))}`}
+                </option>
+              )
+            })}
+          </select>
+          {activeRuntime === undefined ? null : (
+            <span className={css.scRuntimeHint}>
+              {t('sc.runtime.fired').replace('{count}', String(Object.keys(activeRuntime.edges).length))}
+              {' · '}
+              {t('sc.runtime.rework').replace('{count}', String(Object.keys(activeRuntime.rework).length))}
+            </span>
+          )}
+        </div>
+      ) : null}
       <ScenarioCanvas
         stages={stages}
         roots={roots}
         exits={exits}
         entryPosition={entryPos}
         exitPosition={exitPos}
+        runtime={activeRuntime}
         openId={openId}
         layoutEpoch={layoutEpoch}
         onOpen={(id) => { setOpenId(id === openId ? undefined : id) }}
@@ -640,6 +714,8 @@ interface ScenarioNodeData extends Record<string, unknown> {
   readonly open: boolean
   readonly routes: readonly string[]
   readonly ghost?: 'in' | 'out'
+  /** Runtime overlay: the engine actually reached/fired this stage. */
+  readonly fired?: boolean
 }
 
 /** One canvas node: kind badge + title + meta; gate carries PASS/FAIL outlets,
@@ -666,7 +742,7 @@ function ScenarioFlowNode({ data }: NodeProps<Node<ScenarioNodeData>>): React.JS
     )
   }
   return (
-    <div className={[css.scFlowNode, kindClass, data.open ? css.stageNodeActive : ''].join(' ')}>
+    <div className={[css.scFlowNode, kindClass, data.open ? css.stageNodeActive : '', data.fired === true ? css.scNodeFired : ''].join(' ')}>
       <Handle type="target" position={Position.Left} />
       <span className={css.stageBadge}>{KIND_LABEL[data.kind]}</span>
       <span className={css.stageTitle}>{data.title}</span>
@@ -848,6 +924,31 @@ const FLOW_OUT_ID = '__flow_out'
 /** Reserved branch target: the flow exit (mirrors the host engine constant). */
 const EXIT_TARGET = '__exit'
 
+/** Whether the engine actually touched one stage in a runtime state. */
+function stageTouched(stage: StageRecord, runtime: ScenarioRuntimeState | undefined): boolean {
+  if (runtime === undefined) return false
+  if (runtime.hookRuns[stage.id] !== undefined) return true
+  if (runtime.rework[stage.id] !== undefined) return true
+  for (const key of Object.keys(runtime.edges)) {
+    if (key.startsWith(`${stage.id}>`) || key.endsWith(`>${stage.id}`)) return true
+  }
+  return false
+}
+
+/** Counter suffix the runtime overlay appends to a stage node's meta line. */
+function runtimeMetaSuffix(stage: StageRecord, runtime: ScenarioRuntimeState | undefined): string {
+  if (runtime === undefined) return ''
+  if (stage.kind === 'gate') {
+    const count = runtime.rework[stage.id]
+    return count === undefined ? '' : ` · 已打回 ${count}/${stage.rework?.maxRework ?? 2}`
+  }
+  if (stage.kind === 'agent') {
+    const count = runtime.hookRuns[stage.id]
+    return count === undefined ? '' : ` · 已运行 ${count}/${stage.run?.maxRuns ?? 1}`
+  }
+  return ''
+}
+
 /** Canvas rows derived from stage records, wrapped by an entry and an exit
  * ghost so the user can see where input enters and output leaves. The ghost
  * positions are user-draggable and persist via entryPosition/exitPosition. */
@@ -856,6 +957,7 @@ function canvasNodes(
   openId: string | undefined,
   entryPosition: { x: number; y: number } | undefined,
   exitPosition: { x: number; y: number } | undefined,
+  runtime: ScenarioRuntimeState | undefined,
 ): Node<ScenarioNodeData>[] {
   const real: Node<ScenarioNodeData>[] = stages.map((stage, index) => ({
     id: stage.id,
@@ -863,7 +965,7 @@ function canvasNodes(
     data: {
       kind: stage.kind,
       title: stage.title,
-      meta: stage.kind === 'agent'
+      meta: (stage.kind === 'agent'
         ? `${whenLabel(stage)} · 最多 ${stage.run?.maxRuns ?? 1} 次`
         : stage.kind === 'gate'
           ? `${whenLabel(stage)} · 打回上限 ${stage.rework?.maxRework ?? 2} 次`
@@ -875,9 +977,10 @@ function canvasNodes(
                 ? stage.command ?? ''
                 : stage.kind === 'notify'
                   ? stage.text ?? ''
-                  : whenLabel(stage),
+                  : whenLabel(stage)) + runtimeMetaSuffix(stage, runtime),
       open: stage.id === openId,
       routes: stage.routes ?? [],
+      ...(stageTouched(stage, runtime) ? { fired: true } : {}),
     },
     type: 'scenario',
   }))
@@ -907,8 +1010,10 @@ function canvasNodes(
 
 /** Canvas edges: explicit stage wiring plus persistent entry/exit edges
  * (roots/exits). No auto-derived dashed edges — the boundary wiring is
- * exactly what the user drew. */
-function canvasEdges(stages: readonly StageRecord[], roots: readonly string[], exits: readonly string[]): Edge[] {
+ * exactly what the user drew. Engine-fired edges animate when a runtime
+ * state is overlaid. */
+function canvasEdges(stages: readonly StageRecord[], roots: readonly string[], exits: readonly string[], runtime: ScenarioRuntimeState | undefined): Edge[] {
+  const fired = (key: string): boolean => runtime?.edges[key] === true
   const edges: Edge[] = []
   for (const id of roots) {
     if (!stages.some(stage => stage.id === id)) continue
@@ -946,6 +1051,7 @@ function canvasEdges(stages: readonly StageRecord[], roots: readonly string[], e
         label,
         markerEnd: { type: MarkerType.ArrowClosed, color },
         style: { stroke: color, strokeWidth: 1.8 },
+        ...(fired(target === EXIT_TARGET ? `${stage.id}>${EXIT_TARGET}` : `${stage.id}>${target}`) ? { animated: true } : {}),
       })
     }
     for (const target of stage.next ?? []) {
@@ -956,6 +1062,7 @@ function canvasEdges(stages: readonly StageRecord[], roots: readonly string[], e
         sourceHandle: stage.kind === 'gate' ? 'out' : 'out',
         type: 'scenario',
         markerEnd: { type: MarkerType.ArrowClosed },
+        ...(fired(`${stage.id}>${target}`) ? { animated: true } : {}),
       })
     }
     for (const target of stage.branch?.pass ?? []) pushBranchEdge('pass', target, 'PASS', '#16a34a')
@@ -976,12 +1083,14 @@ function canvasEdges(stages: readonly StageRecord[], roots: readonly string[], e
  * editor. All mutations flow back through `onStagesChange` /
  * `onBoundaryChange`.
  */
-function ScenarioCanvas({ stages, roots, exits, entryPosition, exitPosition, openId, layoutEpoch, onOpen, onStagesChange, onRootsChange, onExitsChange, onBoundaryChange, t }: {
+function ScenarioCanvas({ stages, roots, exits, entryPosition, exitPosition, runtime, openId, layoutEpoch, onOpen, onStagesChange, onRootsChange, onExitsChange, onBoundaryChange, t }: {
   stages: readonly StageRecord[]
   roots: readonly string[]
   exits: readonly string[]
   entryPosition: { x: number; y: number } | undefined
   exitPosition: { x: number; y: number } | undefined
+  /** Engine bookkeeping for one session, shown as a live overlay. */
+  runtime: ScenarioRuntimeState | undefined
   openId: string | undefined
   layoutEpoch: number
   onOpen: (id: string) => void
@@ -992,14 +1101,14 @@ function ScenarioCanvas({ stages, roots, exits, entryPosition, exitPosition, ope
   onBoundaryChange: (which: 'in' | 'out', position: { x: number; y: number }) => void
   t: ScenariosT
 }): React.JSX.Element {
-  const [nodes, setNodes, onNodesChange] = useNodesState(canvasNodes(stages, openId, entryPosition, exitPosition))
-  const [edges, setEdges, onEdgesChange] = useEdgesState(canvasEdges(stages, roots, exits))
+  const [nodes, setNodes, onNodesChange] = useNodesState(canvasNodes(stages, openId, entryPosition, exitPosition, runtime))
+  const [edges, setEdges, onEdgesChange] = useEdgesState(canvasEdges(stages, roots, exits, runtime))
 
   // External stage edits (property panel, toolbar add) resync the canvas.
   // Selection must survive the rebuild: pressing Delete removes exactly the
   // selected nodes/edges, and React Flow reads `selected` off these objects.
   useEffect(() => {
-    setNodes(current => canvasNodes(stages, openId, entryPosition, exitPosition).map(node => {
+    setNodes(current => canvasNodes(stages, openId, entryPosition, exitPosition, runtime).map(node => {
       if (node.id === FLOW_IN_ID || node.id === FLOW_OUT_ID) {
         // Ghosts take the position from state (drag commits land there);
         // only the selection flag survives from the live node.
@@ -1011,11 +1120,11 @@ function ScenarioCanvas({ stages, roots, exits, entryPosition, exitPosition, ope
       const stagePosition = stages.find(stage => stage.id === node.id)?.position
       return { ...node, position: stagePosition ?? existing.position, ...(existing.selected === true ? { selected: true } : {}) }
     }))
-    setEdges(current => canvasEdges(stages, roots, exits).map(edge => {
+    setEdges(current => canvasEdges(stages, roots, exits, runtime).map(edge => {
       const existing = current.find(item => item.id === edge.id)
       return existing === undefined ? edge : { ...edge, ...(existing.selected === true ? { selected: true } : {}) }
     }))
-  }, [stages, roots, exits, entryPosition, exitPosition, openId, setNodes, setEdges])
+  }, [stages, roots, exits, entryPosition, exitPosition, runtime, openId, setNodes, setEdges])
 
   const commitPositions = (updated: readonly Node[]): void => {
     onStagesChange(stages.map(stage => {

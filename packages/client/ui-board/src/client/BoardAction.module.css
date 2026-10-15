@@ -1780,6 +1780,34 @@
   position: relative;
 }
 
+/* Runtime overlay: the engine actually reached this stage. */
+.scNodeFired {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+.scRuntimeBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 2px 8px;
+}
+
+.scRuntimeSelect {
+  max-width: 220px;
+  font-size: 12px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+}
+
+.scRuntimeHint {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .scFlowPortLabel {
   position: absolute;
   right: 14px;

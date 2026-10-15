@@ -1204,6 +1204,12 @@ function serveScenariosApi(scope: Context, dir: string): void {
           return
         }
         if (req.method === 'GET') {
+          // `states=1` also returns the per-session runtime bookkeeping (fired
+          // edges, hook runs, rework counts) the canvas overlays as a live view.
+          if (url.searchParams.get('states') === '1') {
+            json(res, 200, { scenarios: readScenarios(dir), states: readStates(dir) })
+            return
+          }
           json(res, 200, { scenarios: readScenarios(dir) })
           return
         }
