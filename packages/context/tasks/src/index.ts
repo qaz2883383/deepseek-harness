@@ -269,7 +269,7 @@ function renderTaskReadme(task: TaskRecord): string {
     '',
     task.purpose === '' ? '（未填写）' : task.purpose,
     '',
-    '本目录是该任务的输出区：任务下所有会话的产出文件（笔记、报告、数据）优先落在这里。',
+    '本目录是该任务的输出区：仅当任务流程（场景编排）包含落盘节点时，产出文件才会写到这里。',
     '',
   ].join('\n')
 }
@@ -351,9 +351,8 @@ function renderBriefing(task: TaskRecord): string {
     }).join('\n')}\n</plan>`
   return [
     `Current task for this conversation: "${task.title}" (${task.id}, status: ${task.status}, category: ${task.category}).`,
-    `Output directory: every file this task produces (notes, reports, data, generated documents) is written under "${taskOutputDir(task)}/" — relative to this conversation's working directory (the workspace root) — before any other location; write elsewhere only when the user explicitly asks for another path.`,
     `This conversation BELONGS to task ${task.id} and to no other task. You may ONLY maintain THIS task: call task_update with taskId ${task.id} for its plan and progress. NEVER call task_create in this conversation — work done here is recorded on ${task.id} even when it looks like a new piece of work (including "make a plan for X": that plan goes into ${task.id}'s plan). Only when the user EXPLICITLY demands a brand-new unrelated task may you create one, and you must then call task_start to switch this conversation to it.`,
-    'Task updates are user-reviewed: task_update shows the before/after diff to the user first; if they decline with feedback, adjust according to their notes and call task_update again.',
+    'Plan and field updates are user-reviewed: task_update shows the before/after diff to the user first; if they decline with feedback, adjust according to their notes and call task_update again. Progress entries append directly without review — send only the NEW entry, never rewrite or repeat older ones.',
     '',
     `<task id="${task.id}">`,
     `<purpose>\n${task.purpose}\n</purpose>`,
@@ -413,7 +412,7 @@ function renderUpdateDiff(before: TaskRecord, after: TaskRecord): string {
     ['状态', 'status'],
     ['目的', 'purpose'],
     ['计划', 'plan'],
-    ['进展', 'progress'],
+    ['进展（追加）', 'progress'],
   ]
   const changed = fields.filter(([, key]) => JSON.stringify(before[key]) !== JSON.stringify(after[key])).map(([label]) => label)
   return [
@@ -958,7 +957,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'task_update',
-    description: 'Update the task this conversation belongs to (title, purpose, category, plan items, progress, status). The runtime-context task briefing names that task and its id; a conversation may ONLY update its own current task — updating any other task id fails. Every update is USER-REVIEWED: the user sees the before/after diff first and may decline with feedback; when declined, adjust according to their notes and call task_update again with the revised fields. Call it whenever meaningful work happens: rewrite "progress" as a dated changelog entry list, adjust plan items when the approach changes (send the COMPLETE new list; array order is execution order), and set status "done" when the purpose is met. Only provided fields change.',
+    description: 'Update the task this conversation belongs to (title, purpose, category, plan items, progress, status). The runtime-context task briefing names that task and its id; a conversation may ONLY update its own current task — updating any other task id fails. Progress is append-only and NOT user-reviewed: send only the NEW entry (old entries are kept verbatim). Every other field change is USER-REVIEWED: the user sees the before/after diff first and may decline with feedback; when declined, adjust according to their notes and call task_update again with the revised fields. Call it whenever meaningful work happens: append a dated progress entry, adjust plan items when the approach changes (send the COMPLETE new list; array order is execution order), and set status "done" when the purpose is met. Only provided fields change.',
     parameters: {
       taskId: { type: 'string', required: true, description: 'The task id (task-…) — must be the current task from the runtime-context briefing.' },
       title: { type: 'string', description: 'New title.' },
@@ -978,12 +977,12 @@ export function apply(ctx: Context, config: Config): void {
           },
         },
       },
-      progress: { type: 'string', description: 'New progress log (replaces the old one); keep dated entries, newest last.' },
+      progress: { type: 'string', description: 'New progress entry to APPEND after the existing log — never repeat, rewrite, or reorder older entries.' },
       status: { type: 'string', enum: ['active', 'done'], description: 'Task lifecycle state.' },
     },
     output: {
       schema: { type: 'object', additionalProperties: false, properties: { task: { type: 'string', required: true } } },
-      render: (_args, value) => [{ type: 'text', text: `Task updated (user approved):\n\n${value.task}` }],
+      render: (_args, value) => [{ type: 'text', text: `Task updated:\n\n${value.task}` }],
     },
     async execute(args, exec) {
       const tasks = readTasks(dir)
@@ -1003,12 +1002,22 @@ export function apply(ctx: Context, config: Config): void {
         const value = args[field]
         if (typeof value === 'string') next[field] = value
       }
+      // Progress is append-only: the model sends the new entry, older entries
+      // are kept verbatim (a resend of the whole log is a no-op).
+      if (typeof args.progress === 'string' && args.progress.trim() !== '' && args.progress.trim() !== before.progress.trim()) {
+        next.progress = before.progress === '' ? args.progress : `${before.progress}\n${args.progress}`
+      } else {
+        next.progress = before.progress
+      }
       if (args.category === 'work' || args.category === 'learning') next.category = args.category
       if (Array.isArray(args.plan)) next.plan = normalizePlan(args.plan)
       if (args.status === 'active' || args.status === 'done') next.status = args.status
-      // User review gate: only a conversation-driven update (live agent) asks;
-      // programmatic callers (none today) would apply directly.
-      if (exec.agent !== undefined) {
+      // User review gate: a progress-only append lands directly; any other
+      // field change still asks first (plan updates stay user-approved).
+      const progressOnly = next.title === before.title && next.purpose === before.purpose
+        && next.category === before.category && next.status === before.status
+        && JSON.stringify(next.plan) === JSON.stringify(before.plan)
+      if (exec.agent !== undefined && !progressOnly) {
         await reviewTaskUpdate(ctx, before, next, exec.agent, exec.signal)
       }
       tasks.splice(tasks.indexOf(before), 1, next)

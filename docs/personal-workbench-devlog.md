@@ -512,6 +512,17 @@ packages/client/ui-board/
 
 **v27.1 补丁（用户反馈"连线后马上消失"）**：真实用户拖拽落点常在**节点身体**而非精确端口（默认容差仅 20px，超差即取消——拖出的预览线落下即消失，正是"马上消失"的现象）。三层加固：① `connectionRadius={40}`（端口容差翻倍）；② **onConnectEnd 兜底**——拖到节点 body 上松手也识别 set-root/set-sink 手势（`elementFromPoint(clientX/Y)` 定位落点节点，只对边界节点语义生效；注意合成事件 `event.target` 是 document 不可靠，必须用坐标反查）；③ ghost 端口视觉放大（12px + 2px 边框）更易命中。CDP 端 handle→handle 主路径已实测 dirty=true（180 轮分轮 drag），body fallback 因 CDP 嵌套滚动坐标失真未能自动化复现，留待用户实测确认。
 
+### 2026-10-15 · v30：进展免审追加式 + 去落盘指引 + 压制场景流程的叙述轮（用户二反馈）
+
+**反馈 1：计划更新保持询问，进展更新免询问且只许追加**。task_update 拆分语义：`progress` 改为**纯追加**（模型只发新条目，旧条目逐字保留；重发全量日志=空操作保护），**仅进展变更跳过用户审核直接落盘**；title/purpose/category/plan/status 任一变化仍走 userQuestions 审核卡（diff 标签改"进展（追加）"）。工具描述、任务简报同步改为"进展直接追加无需审核，其余字段用户审核"。
+
+**反馈 2：test 场景三轮返回太多 / reply.md 不该落盘 / 只有正式输出应突出**。三层处理：
+- **reply.md 根因**：任务简报里的"Output directory: every file this task produces …"行让模型逢任务就写文件——删除该行（README 措辞同步软化为"仅当流程含落盘节点才写"）；落盘指引此后**只存在于场景 persist 节点的阶段注入**（符合用户"有必要在流水线里加落盘节点"的设计）
+- **三轮噪音真相**（实测「吵架」任务会话）：场景通知在对话视图本就被 [chat-visibility](packages/client/ui-chat/src/client/contract/chat-visibility.ts) 整体隐藏（context 节点仅工具变更才显示）——用户看到的多余内容全是**模型对每条通知的叙述轮**（"审核已提交，等待…""已进入主循环阶段…"）+ 回复内嵌 bookkeeping 清单（输入判定/产出落盘/审核结果/任务记录）
+- **压制叙述轮**：PASS/EXHAUSTED/fail→exit/ENTER 四类通知与 pipeline_review 工具结果全部追加"此前的回复即为正式输出，不要重复/无需专门回复确认/无需向用户复述等待状态"指引——通知仍隐藏（弱于折叠），模型被明确告知不复述，用户每条输入应只看到一条正式回复
+
+**遗留**：模型回复内嵌 bookkeeping 清单（"本轮已收尾：输入判定…产出落盘…"）取决于模型自觉，场景纪律文本（test 场景 loop 纪律现为空）可进一步约束；通知在对话视图隐藏 vs 折叠一行摘要的取舍（现在轨迹视图可见完整通知）待用户反馈。
+
 ### 2026-10-15 · v29：用户三反馈——出入口可拖 / 任务选场景 / 分支直连出口（fail 直接返回）
 
 **反馈 1：出入口节点不可拖，图乱**。`ScenarioRecord` 新增 `entryPosition`/`exitPosition`（canvas-only，同 roots/exits 模式）；ghost 节点改 `draggable`（保留不可删），`onNodeDragStop` 按 `__flow_*` id 分流到 `onBoundaryChange` → 草稿态 → 保存落盘（undefined 时 JSON 序列化自动丢键=清除）；resync 时 ghost 取 state 位置（只保留 selected），放弃回滚、自动排列重置为推导位。验证：JSON 预设 (-260,20) → 节点 transform 精确匹配；`draggable` class 出现。

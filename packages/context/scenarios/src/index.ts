@@ -754,7 +754,7 @@ function fireTargets(ctx: FireCtx, stage: StageRecord, route: string): void {
       ctx.parent.followup(createUserMessage({
         content: [{
           type: 'text',
-          text: `[场景编排] 上游阶段完成，进入阶段「${target.title}」。${target.kind === 'gate' ? '完成主要工作后请调用 pipeline_review 提交审核。' : ''}`,
+          text: `[场景编排] 上游阶段完成，进入阶段「${target.title}」。${target.kind === 'gate' ? '完成主要工作后请调用 pipeline_review 提交审核。' : ''}（无需专门回复确认进入；有实际工作才输出。）`,
         }],
         source: { kind: 'scenario-hook', form: 'notice', summary: `${ctx.scenario.name}/${target.title} ENTER` },
       }))
@@ -975,7 +975,7 @@ async function runReviewer(ctx: FireCtx, gate: StageRecord): Promise<void> {
     parent.followup(createUserMessage({
       content: [{
         type: 'text',
-        text: `[场景编排 · ${gate.title}] 审核通过。\n\n${opinion}\n\n（产出已过审，可以进入收尾/落盘。）`,
+        text: `[场景编排 · ${gate.title}] 审核通过。\n\n${opinion}\n\n（产出已过审：此前的回复即为正式输出，除非用户追问，不要重复其内容。）`,
       }],
       source: { kind: 'scenario-hook', form: 'notice', summary: `${scenario.name}/${gate.title} PASS` },
     }))
@@ -990,7 +990,7 @@ async function runReviewer(ctx: FireCtx, gate: StageRecord): Promise<void> {
     parent.followup(createUserMessage({
       content: [{
         type: 'text',
-        text: `[场景编排 · ${gate.title}] 审核未过，但已达打回上限（${String(maxRework)} 次），按配置放行。审核意见（供参考）：\n\n${opinion}`,
+        text: `[场景编排 · ${gate.title}] 审核未过，但已达打回上限（${String(maxRework)} 次），按配置放行。审核意见（供参考）：\n\n${opinion}\n\n（放行后此前的回复即为正式输出，无需重复其内容。）`,
       }],
       source: { kind: 'scenario-hook', form: 'notice', summary: `${scenario.name}/${gate.title} EXHAUSTED` },
     }))
@@ -1005,7 +1005,7 @@ async function runReviewer(ctx: FireCtx, gate: StageRecord): Promise<void> {
       content: [{
         type: 'text',
         text: (gate.branch?.fail ?? []).includes(EXIT_TARGET)
-          ? `[场景编排 · ${gate.title}] 审核未过（第 ${String(count)}/${String(maxRework)} 次），fail 边连到流程出口：流程就此结束，未过审的产出与审核意见已直接返回。\n\n${opinion}`
+          ? `[场景编排 · ${gate.title}] 审核未过（第 ${String(count)}/${String(maxRework)} 次），fail 边连到流程出口：流程就此结束，未过审的产出与审核意见已直接返回。\n\n${opinion}\n\n（上述内容即为最终输出，不要再重复输出。）`
           : `[场景编排 · ${gate.title}] 审核未过（第 ${String(count)}/${String(maxRework)} 次），按编排转入后续处理。审核意见：\n\n${opinion}`,
       }],
       source: { kind: 'scenario-hook', form: 'notice', summary: `${scenario.name}/${gate.title} FAIL-ROUTE` },
@@ -1080,7 +1080,7 @@ function installGateTool(
           inflight.delete(sessionId)
         }
       })()
-      return { submitted: true, note: `审核员已启动（关卡「${gate.title}」），结果将以系统通知回注。` }
+      return { submitted: true, note: `审核员已启动（关卡「${gate.title}」），结果将以系统通知回注。无需向用户复述等待状态，保持本轮回复聚焦于正式内容。` }
     },
   }))
 }
